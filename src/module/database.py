@@ -9,7 +9,7 @@ from src.module.settings import settings
 
 # oracle connection string for SQL alchemy engine
 oracle_connection_url = URL.create(
-    drivername='oracle+cx_oracle',
+    drivername='oracle+oracledb',
     password=settings.oracle_password,
     username=settings.oracle_username,
     port=settings.oracle_port,
@@ -71,6 +71,24 @@ def oracle_execute(query):
     with engine.connect() as connection:
         connection.execute(text(query))
         connection.commit()
+
+
+@logging_timer()
+def oracle_execute_script(filepath):
+    """Execute a ';'-separated multi-statement sql file, one statement at a time.
+    'drop table' statements are best-effort so reruns don't fail on a missing table.
+    """
+    statements = [s.strip() for s in sql_open(filepath).split(';') if s.strip()]
+    engine = create_engine(oracle_connection_url)
+    with engine.connect() as connection:
+        for statement in statements:
+            try:
+                connection.execute(text(statement))
+                connection.commit()
+            except Exception:
+                if statement.lower().startswith('drop table'):
+                    continue
+                raise
 
 
 @logging_timer()
