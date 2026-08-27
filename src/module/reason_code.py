@@ -102,9 +102,9 @@ SEVERITY_THRESHOLD = 10
 N_REASONS = TOP_POSITIVE + TOP_NEGATIVE
 
 AUTO_REASONS = {
-    'mob0': ("Зээлгүй", "negative"),
+    'mob0': ("Идэвхтэй зээлгүй", "negative"),
     'od': ("Зээлийн түүх муу", "negative"),
-    'inactive': ("Зээлийн бүтээгдэхүүн ашиглаагүй удсан", "negative"),
+    'inactive': ("Идэвхтэй зээлгүй", "negative"),
     'mob12+': ("Үнэнч харилцагч ", "positive"),
 }
 MAX_REASONS = N_REASONS + 1

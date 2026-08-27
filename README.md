@@ -1,6 +1,6 @@
-# user-score-prod
+# User Score Deployment
 
-Monthly batch pipeline that builds a customer credit/behavior score and reason
+Monthly batch pipeline that builds a Toki User Score and reason
 codes from Oracle source tables.
 
 ## Pipeline
@@ -39,6 +39,16 @@ failure.
 docker run --rm --env-file=$HOME/envs/oracle-template.env oracle-template:v0.1.0
 ```
 
+## Scheduled/manual runs via GitHub Actions
+
+[.github/workflows/run-pipeline.yml](.github/workflows/run-pipeline.yml) runs
+the pipeline on a self-hosted runner (`production` environment):
+
+- **Schedule**: 11:00 Asia/Ulaanbaatar (UTC+8) on the 2nd of every month
+- **Manual trigger**: `workflow_dispatch`
+- Pulls Oracle credentials and `LOG_LEVEL` from the environment's secrets and
+  runs the `user-score-prod:v1.0.0` image
+
 ## This repo includes
 
 - Oracle pipeline for scoring users (`src/module/target_pool.py`,
@@ -47,4 +57,6 @@ docker run --rm --env-file=$HOME/envs/oracle-template.env oracle-template:v0.1.0
 - Data frame minification function and logging/timer decorator
 - Oracle database connection functions (`src/module/database.py`)
 - Dockerfile for deploying
+- GitHub Actions workflow for scheduled/manual pipeline runs
+  (`.github/workflows/run-pipeline.yml`)
 
