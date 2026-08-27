@@ -1,3 +1,4 @@
+--wallet
 create table t_user_score_wallet_temp as 
 with balance_raw as (
   select
@@ -43,7 +44,6 @@ select
 
   max(avg_balance)                                                         as max_balance_w_6m,
   avg(min_balance)                                                         as avg_min_balance_w_6m,
-  min(min_balance)                                                         as min_min_balance_w_6m,
   max(case when is_w3m = 1 then max_balance end)                           as max_max_balance_w_3m,
   avg(case when is_w1m = 1 then avg_balance end)                           as avg_balance_w_1m
 
@@ -51,6 +51,7 @@ from balance_base
 group by user_id, base_month
 order by user_id;
 
+--transaction
 create table t_user_score_transaction_temp as
 WITH raw_transaction AS (
     SELECT 
@@ -228,6 +229,7 @@ from transaction_raw
 group by user_id, base_month
 order by user_id;
 
+--tenure
 create table t_user_score_tenure_temp as 
 select distinct
   a.user_id,
@@ -270,35 +272,7 @@ left join (
 ) b on a.user_id = b.id_
 left join toki.dpr_maat_customers c on a.user_id = c.identifier;
 
-create table t_user_score_service_more_temp as
-with service_raw as (
-    select distinct
-        d.user_id,
-        d.base_month,
-        b.service_name as merchant_name,
-        c.category as merchant_group,
-        case when to_number(to_char(to_date(a.transaction_date, 'yyyy-mm-dd'), 'yyyymm')) >=
-            to_number(to_char(add_months(to_date(d.base_month, 'yyyymm'), -3), 'yyyymm'))
-        then 1 else 0 end as is_w3m,
-        case when to_number(to_char(to_date(a.transaction_date, 'yyyy-mm-dd'), 'yyyymm')) >=
-            to_number(to_char(add_months(to_date(d.base_month, 'yyyymm'), -1), 'yyyymm'))
-        then 1 else 0 end as is_w1m
-    from t_toki_transaction a
-    inner join t_merchant_lookup b on b.merchant_id = a.target_id 
-    left join toki_data_proc_user.lookup_merchant_category c on lower(b.merchant_group) = c.merchant_group
-    inner join t_temp_union_pool d on a.userid = d.user_id
-        and to_number(to_char(to_date(a.transaction_date, 'yyyy-mm-dd'), 'yyyymm')) between
-            to_number(to_char(add_months(to_date(d.base_month, 'yyyymm'), -6), 'yyyymm'))
-            and to_number(to_char(add_months(to_date(d.base_month, 'yyyymm'), -1), 'yyyymm'))
-)
-    select 
-        user_id,
-        base_month,
-        count(distinct merchant_name) as merchant_count_w_6m,
-        count(distinct case when is_w1m = 1 then merchant_group end) as merchant_group_count_w_1m
-    from service_raw
-    group by user_id, base_month;
-
+--service
 CREATE TABLE t_user_score_service_more_temp AS
 WITH 
 refund_transaction AS (
@@ -306,6 +280,7 @@ refund_transaction AS (
         REFUND_TRANSACTION_ID,
         SUM(t.amount) AS ref_amount
     FROM toki.DPR_TAJET_REFUND_TRANSACTIONS t
+    where TRANSACTION_DATE BETWEEN ADD_MONTHS(TRUNC(SYSDATE) - 1, -6) AND TRUNC(SYSDATE) - 1
     GROUP BY REFUND_TRANSACTION_ID
 ),
 dispute_transaction AS (
@@ -314,6 +289,7 @@ dispute_transaction AS (
         MAX(AMOUNT) AS disp_amnt,
         MAX(fee) AS disp_fee
     FROM toki.DPR_TAJET_DISPUTE_TRANSACTION t
+    where TRANSACTION_DATE BETWEEN ADD_MONTHS(TRUNC(SYSDATE) - 1, -6) AND TRUNC(SYSDATE) - 1
     GROUP BY DISPUTED_TRANSACTION_ID
 ),
 postpay_transaction AS (
@@ -324,6 +300,7 @@ postpay_transaction AS (
     WHERE t.refund_amount = 'None'
         AND PAYMENT_TYPE = 'post-pay'
         AND PAY = 'True'
+        and to_date(substr(created_date, 1, 10), 'yyyy-mm-dd') BETWEEN ADD_MONTHS(TRUNC(SYSDATE) - 1, -6) AND TRUNC(SYSDATE) - 1
 ),
 toki_transaction AS (
     -- P2M and SUB transactions
@@ -574,11 +551,11 @@ service_raw AS (
 SELECT 
     user_id,
     base_month,
-    COUNT(DISTINCT merchant_name) AS merchant_count_w_6m,
     COUNT(DISTINCT CASE WHEN is_w1m = 1 THEN merchant_group END) AS merchant_group_count_w_1m
 FROM service_raw
 GROUP BY user_id, base_month;
 
+--parking
 create table t_user_score_parking_temp as
 with parking_raw as (
   select distinct
@@ -589,7 +566,7 @@ with parking_raw as (
     a.payment_type,
     a.parking_id,
     to_number(to_char(to_date(substr(a.created_date, 1, 10), 'yyyy-mm-dd'), 'yyyymmdd')) as created_date
-  from (select * from toki.mobility_project_parking_invoices where pay = 'True') a
+  from (select * from toki.mobility_project_parking_invoices where pay = 'True' and to_date(substr(created_date, 1, 10), 'yyyy-mm-dd') BETWEEN ADD_MONTHS(TRUNC(SYSDATE) - 1, -6) AND TRUNC(SYSDATE) - 1) a
   inner join toki.mobility_project_parking_park_lists b
     on a.parking_id = b.parking_id and b.status = 'working'
 ),
@@ -626,6 +603,7 @@ from parking_base
 group by user_id, base_month
 order by user_id;
 
+--number value
 create table t_user_score_number_value_temp as 
 with number_change_log as (
     select
@@ -705,13 +683,56 @@ select
 
 from number_base;
 
+-- mp
 create table t_user_score_mp_usage_temp as 
-with mp_raw as (
-    select * from tergel_mu.app_usage_miniprogramm_final
-    union
-    select * from tergel_mu.app_usage_miniprogramm_final_cont
-    union
-    select * from t_app_usage_miniprogramm
+with user_events as (
+    select 
+        userid,
+        businessname,
+        createdat,
+        to_char(to_date(to_char(createdat, 'yyyy') || '-' || lpad(to_char(createdat, 'mm'), 2, '0') || '-' || lpad(to_char(createdat, 'dd'), 2, '0'), 'yyyy-mm-dd'), 'yyyymm') as createmon,
+        to_char(createdat, 'hh24') as hour,
+        case 
+            when to_char(createdat, 'hh24') between '00' and '05' then 'night'
+            when to_char(createdat, 'hh24') between '06' and '11' then 'morning'
+            when to_char(createdat, 'hh24') between '12' and '17' then 'afternoon'
+            else 'evening'
+        end as time_of_day
+    from toki.mongo_miniprogramuserlogs
+    where createdat BETWEEN ADD_MONTHS(TRUNC(SYSDATE) - 1, -6) AND TRUNC(SYSDATE) - 1
+),
+time_of_day_activity as (
+    select 
+        userid,
+        createmon,
+        time_of_day,
+        count(*) as time_of_day_count
+    from user_events
+    group by userid, time_of_day, createmon
+),
+time_of_day_percentages as (
+    select 
+        userid,
+        createmon,
+        sum(case when time_of_day = 'night' then time_of_day_count else 0 end) as night_count,
+        sum(case when time_of_day = 'morning' then time_of_day_count else 0 end) as morning_count,
+        sum(case when time_of_day = 'afternoon' then time_of_day_count else 0 end) as afternoon_count,
+        sum(case when time_of_day = 'evening' then time_of_day_count else 0 end) as evening_count
+    from time_of_day_activity
+    group by userid, createmon
+),
+mp_raw as (
+    select 
+        ue.userid,
+        ue.createmon,
+        tdp.night_count as night_usage_count,
+        tdp.morning_count as morning_usage_count,
+        tdp.afternoon_count as afternoon_usage_count,
+        tdp.evening_count as evening_usage_count
+    from user_events ue
+    join time_of_day_percentages tdp on ue.userid = tdp.userid and ue.createmon = tdp.createmon
+    group by ue.userid, ue.createmon, tdp.night_count, tdp.morning_count, tdp.afternoon_count, tdp.evening_count
+    order by ue.userid, ue.createmon
 ),
 mp_base as (
     select
@@ -747,14 +768,13 @@ mp_base as (
 
         sum(night_usage_count + morning_usage_count + afternoon_usage_count + evening_usage_count) as mp_usage_count_sum_w_6m,
 
-        min(night_usage_count + morning_usage_count + afternoon_usage_count + evening_usage_count) as mp_usage_count_min_w_6m,
-
         stddev(night_usage_count + morning_usage_count + afternoon_usage_count + evening_usage_count) as mp_usage_count_std_w_6m
 
 
     from mp_base
     group by user_id, base_month;
 
+--kyc
 create table t_user_score_kyc_temp as
 with user_kyc_raw as (
     select 
@@ -771,17 +791,13 @@ with user_kyc_raw as (
         a.user_id,
         a.base_month,
         max(case when b.isvisibletoadmin = 'True' and b.adminaction = 'ADMIN_APPROVED'
-                 and b.kyctype is not null then b.kyctype end)                              as last_kyctype_true,
-        trunc(to_date(to_char(a.base_month), 'yyyymm'))
-            - trunc(max(case when b.isvisibletoadmin = 'True' and b.adminaction = 'ADMIN_APPROVED'
-                              and b.kyctype is not null
-                              then to_timestamp(b.createdat, 'YYYY-MM-DD HH24:MI:SS.FF') end))
-                                                                                            as days_since_last_kyc_true
+                 and b.kyctype is not null then b.kyctype end)                              as last_kyctype_true
     from t_temp_union_pool a
     inner join user_kyc_raw b on a.user_id = b.userid
         and to_number(b.kyc_month) < to_number(to_char(a.base_month))
-    group by a.user_id, a.base_month
+    group by a.user_id, a.base_month;
 
+--gaming
 create table t_user_score_gaming_temp as
 with txn_raw as (
   select
@@ -792,16 +808,18 @@ with txn_raw as (
          then '6448c9fd39c15f8d9bb639a6'
          else a.target_account_id
     end                                                          as target_id
-  from toki.dpr_thoth_account_entries a
+  from (select * from toki.dpr_thoth_account_entries where transaction_date BETWEEN ADD_MONTHS(TRUNC(SYSDATE) - 1, -6) AND TRUNC(SYSDATE) - 1 ) a
   left join toki.dpr_thoth_accounts b on a.account_id = b.id_
   left join (
     select refund_transaction_id, sum(amount) as ref_amount
     from toki.dpr_tajet_refund_transactions
+    where transaction_date BETWEEN ADD_MONTHS(TRUNC(SYSDATE) - 1, -6) AND TRUNC(SYSDATE) - 1
     group by refund_transaction_id
   ) d on a.transaction_id = d.refund_transaction_id
   left join (
     select disputed_transaction_id, max(amount) as disp_amnt, max(fee) as disp_fee
     from toki.dpr_tajet_dispute_transaction
+    where transaction_date BETWEEN ADD_MONTHS(TRUNC(SYSDATE) - 1, -6) AND TRUNC(SYSDATE) - 1
     group by disputed_transaction_id
   ) e on a.transaction_id = e.disputed_transaction_id
   where a.message like '%P2M%'
@@ -821,20 +839,13 @@ with txn_raw as (
     a1.amount,
     'gameon' as target_id
   from (
-    select substr(a.msisdn, 4, 8) as userid,
-           to_char(a.create_date, 'yyyy-mm-dd') as transaction_date,
-           a.total_price as amount
-    from datawarehouse.game_on_cdr a
-    where a.item_description = 'GAMEON'
-
-    union
-
     select substr(a.phone_no, 4, 8) as userid,
            substr(a.create_date, 1, 10) as transaction_date,
            to_number(a.total_price) as amount
     from dev_ai.t_sla_merchant_log a
     where a.item_name = 'GAMEON'
       and a.status_code = 'SUCCESS'
+      and substr(a.create_date, 1, 10) BETWEEN to_char(ADD_MONTHS(TRUNC(SYSDATE) - 1, -6), 'yyyy-mm-dd') AND to_char(TRUNC(SYSDATE) - 1, 'yyyy-mm-dd')
   ) a1
   left join (
     select identifier as userid, device_no
@@ -887,31 +898,43 @@ from gaming_base
 group by user_id, base_month
 order by user_id;
 
+--fire
 create table t_user_score_fire_temp as
-with fire_raw as (
-    select * from t_app_usage_firebase_old
-    union
-    select * from t_app_usage_firebase
+with daily_data as (
+  select 
+    user_id,
+    to_date(event_day, 'yyyymmdd') as event_date,
+    to_number(substr(event_day, 1, 6)) as event_month,
+    city, country, device_brand_name, mobile_model_name, device_version, app_version,
+    session_cnt, session_sec, open_mp_cnt, qr_scan_cnt, read_noti_cnt, wallet_merchant_cnt,
+    qr_button_cnt, app_update_cnt, app_remove_cnt,
+    case when open_mp_cnt > 0 then 1 else 0 end as has_mp_activity,
+    case when (qr_scan_cnt + read_noti_cnt + wallet_merchant_cnt) > 0 then 1 else 0 end as has_high_activity
+  from toki.fire_analytics_user_daily 
+  where user_id is not null
+  and event_day between to_number(to_char(add_months(trunc(sysdate) - 1, -6), 'yyyymmdd')) and to_number(to_char(trunc(sysdate) - 1, 'yyyymmdd'))
+),
+fire_raw as (
+  select distinct
+    d.user_id as userid,
+    d.event_month,
+    
+    count(distinct d.mobile_model_name) as mobile_div,
+
+    avg(d.session_cnt) as avg_session_cnt_d,
+    sum(d.session_cnt) as total_session_cnt
+
+from daily_data d
+group by d.user_id, d.event_month
 ),
 fire_base as (
     select
         a.user_id,
         a.base_month,
         b.event_month,
-        b.device_div,
-        b.is_device_changed,
         b.mobile_div,
-        b.is_model_changed,
-        b.engage_days,
         b.avg_session_cnt_d,
-        b.max_session_cnt_d,
         b.total_session_cnt,
-        b.std_session_cnt_d,
-        b.avg_session_sec_d,
-        b.max_session_sec_d,
-        b.total_session_sec,
-        b.std_session_sec_d,
-        b.total_app_removal,
         case when to_number(b.event_month) >=
             to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -3), 'yyyymm'))
         then 1 else 0 end as is_w3m,
@@ -929,73 +952,13 @@ select
     user_id,
     base_month,
 
-    round(avg(mobile_div), 2)                                                   as avg_fire_model_cnt_w_6m,
-    count(distinct event_month)                                                 as distinct_fire_event_months_w_6m,
-    avg(case when is_w1m = 1 then avg_session_cnt_d end) as avg_fire_session_cnt_w_1m,
-
-    sum(case when is_w1m = 1 then total_session_cnt else 0 end) as sum_fire_session_cnt_w_1m
+    round(avg(mobile_div), 2)                                                   as avg_fire_model_cnt_w_6m
 
 from fire_base
 group by user_id, base_month
 order by user_id;
 
-create table t_user_score_card_temp as
-with card_raw as (
-    select
-        a.account_id                                                               as user_id,
-        to_date(to_char(b.base_month, 'FM000000'), 'YYYYMM') as base_month,
-        lower(a.bank_name)                                                         as bank_name,
-        lower(a.card_holder_name)                                                  as holder_name,
-        trunc(a.created_on)                                                        as add_date,
-        trunc(a.removed_date)                                                      as removed_date
-    from toki.dpr_tajet_tokens a
-    inner join t_temp_union_pool b on a.account_id = b.user_id
-),
-card_base as (
-    select
-        user_id,
-        base_month,
-        bank_name,
-        holder_name,
-        add_date,
-        removed_date,
-        case when add_date < base_month
-             and (removed_date is null or removed_date >= base_month)
-        then 1 else 0 end                                                          as is_active,
-        case when add_date >= base_month - 180
-             and add_date <  base_month
-        then 1 else 0 end                                                          as is_add_w6m,
-        case when add_date >= base_month - 90
-             and add_date <  base_month
-        then 1 else 0 end                                                          as is_add_w3m,
-        case when add_date >= base_month - 30
-             and add_date <  base_month
-        then 1 else 0 end                                                          as is_add_w1m,
-        case when removed_date is not null
-             and removed_date >= base_month - 180
-             and removed_date <  base_month
-        then 1 else 0 end                                                          as is_remove_w6m,
-        case when removed_date is not null
-             and removed_date >= base_month - 90
-             and removed_date <  base_month
-        then 1 else 0 end                                                          as is_remove_w3m,
-        case when removed_date is not null
-             and removed_date >= base_month - 30
-             and removed_date <  base_month
-        then 1 else 0 end                                                          as is_remove_w1m
-    from card_raw
-)
-
-select
-    user_id,
-    base_month,
-
-    base_month - max(case when add_date < base_month then add_date end)            as days_since_last_add
-
-from card_base
-group by user_id, base_month
-order by user_id;
-
+--car ownership
 create table t_user_score_car_ownership_temp as
 with saved_cars as (
   select
@@ -1204,11 +1167,7 @@ select
   base_month,
   count(*) as req_cnt_w_2y,
   count(case when request_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -12)
-    then 1 end)                                                                  as req_cnt_w_1y,
-  count(case when request_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -6)
-    then 1 end)                                                                  as req_cnt_w_6m,
-  trunc(to_date(to_char(base_month), 'yyyymm'))
-    - max(request_date)                                                          as day_since_last_req
+    then 1 end)                                                                  as req_cnt_w_1y
 from request_raw
 group by user_id, base_month
 order by user_id;
@@ -1367,8 +1326,6 @@ bnpl_util as (
 ),
 
 all_raw as (
-  -- select user_id, base_month, year_month, balance, total_limit from lease_util
-  -- union all
   select user_id, base_month, year_month, balance, total_limit from credit_util
   union all
   select user_id, base_month, year_month, balance, total_limit from bnpl_util
@@ -1388,8 +1345,7 @@ select
   base_month,
 
   round(max(util_ratio), 2)                                                        as max_util_pct_w_2y,
-  round(min(util_ratio), 2)                                                        as min_util_pct_w_2y,
-  
+
   round(min(case when to_number(year_month) >=
     to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm'))
     then util_ratio end), 2)                                                       as min_util_pct_w_6m,
@@ -1722,7 +1678,7 @@ daily_usage as (
     to_date(to_char(base_month), 'yyyymm') - max(trunc(created_date))                                                                 as max_usage_date
 
   from base_data
-  group by user_id, base_month
+  group by user_id, base_month;
 
 create table t_user_score_lease_usage_temp as
 with raw_data as (
@@ -1803,9 +1759,9 @@ daily_usage as (
     to_date(to_char(base_month), 'yyyymm') - max(usage_date)                                                                    as days_since_last_lease_usage
 
   from base_data
-  group by userid, base_month
+  group by userid, base_month;
 
-create table t_user_score_age_test as
+create table t_user_score_age_temp as
 select
   user_id,
   base_month,
@@ -1830,6 +1786,7 @@ from (
   from t_temp_union_pool a
   inner join toki.dpr_maat_customers b on a.user_id = b.identifier
   where b.dob is not null
+);
 
 create table t_user_score_bnpl_usage_temp as
 with merchant_raw as (
@@ -1860,5 +1817,204 @@ with merchant_raw as (
     to_date(to_char(base_month), 'yyyymm') - max(usage_date)                                                                          as days_since_last_bnpl_usage
 
   from merchant_raw
-  group by account_id, base_month
-)
+  group by account_id, base_month;
+
+create table t_user_score_feature_set_temp as
+select
+  t.user_id,
+  t.mob_group,
+  t.base_month,
+  t.mob,
+  t.active_mob,
+  t.model_od,
+  t.model_event,
+
+  ag.age,
+
+  g.sum_gaming_amt_w_6m,
+
+  pk.sum_parking_amt_w_6m,
+
+  svc.data_payment_count_sum_w3m,
+  svc.transport_count_sum_w6m,
+
+  sm.merchant_group_count_w_1m,
+
+  co.is_own_car,
+
+  txn.max_trans_cnt_w_6m,
+  txn.std_trans_amt_w_6m,
+  txn.sum_trans_amt_w_1m,
+  txn.max_trans_amt_credit_w_6m,
+  txn.std_trans_amt_credit_w_6m,
+  txn.sum_trans_amt_card_w_1m,
+  txn.std_trans_cnt_night_w_6m,
+  txn.sum_trans_cnt_morning_w_6m,
+  txn.sum_trans_cnt_non_credit_w_1m,
+  txn.sum_trans_amt_non_credit_w_6m,
+  txn.std_trans_amt_non_credit_w_3m,
+  txn.distinct_transaction_months_w_6m,
+
+  wlt.max_balance_w_6m,
+  wlt.avg_min_balance_w_6m,
+  wlt.max_max_balance_w_3m,
+  wlt.avg_balance_w_1m,
+
+  fr.avg_fire_model_cnt_w_6m,
+
+  kyc.last_kyctype_true,
+
+  mp.night_usage_count_std_w_6m,
+  mp.morning_usage_count_sum_w_1m,
+  mp.morning_usage_per_w_6m,
+  mp.night_usage_month_w_6m,
+  mp.mp_usage_count_sum_w_6m,
+  mp.mp_usage_count_std_w_6m,
+
+  case
+    when nv.same_double = 1 or nv.double_double = 1 or nv.triple_start = 1 or nv.triple_end = 1
+      or nv.valid_bronze = 1 or nv.premium_index = 1 or nv.gold_pre = 1 or nv.silver_pre = 1
+      or nv.gold_e = 1 or nv.cons_gold = 1 or nv.sub_super_end = 1 or nv.super_ended = 1
+    then 1 else 0
+  end as is_number_valued,
+
+  te.toki_tenure as dynamic_toki_tenure,
+  te.sign_tenure as dynamic_sign_tenure,
+
+  alu.max_util_pct_w_3m,
+  alu.max_util_pct_w_2y,
+  alu.latest_util_pct,
+  alu.min_util_pct_w_6m,
+
+  ar.req_cnt_w_2y,
+  ar.req_cnt_w_1y,
+
+  case
+    when br.max_od_w_2y is null and cr.max_od_w_2y is null and lr.max_od_w_2y is null then null
+    else greatest(nvl(br.max_od_w_2y, 0), nvl(cr.max_od_w_2y, 0), nvl(lr.max_od_w_2y, 0))
+  end as loan_max_od_w_2y,
+  case
+    when br.max_od_w_6m is null and cr.max_od_w_6m is null and lr.max_od_w_6m is null then null
+    else greatest(nvl(br.max_od_w_6m, 0), nvl(cr.max_od_w_6m, 0), nvl(lr.max_od_w_6m, 0))
+  end as loan_max_od_w_6m,
+  case
+    when br.sum_od_w_2y is null and cr.sum_od_w_2y is null and lr.sum_od_w_2y is null then null
+    else nvl(br.sum_od_w_2y, 0) + nvl(cr.sum_od_w_2y, 0) + nvl(lr.sum_od_w_2y, 0)
+  end as loan_sum_od_w_2y,
+  case
+    when bu.bnpl_usage_amt_w_1y is null and cu.credit_usage_amt_w_1y is null and lu.lease_usage_amt_w_1y is null then null
+    else nvl(bu.bnpl_usage_amt_w_1y, 0) + nvl(cu.credit_usage_amt_w_1y, 0) + nvl(lu.lease_usage_amt_w_1y, 0)
+  end as loan_usage_amt_w_1y,
+  case
+    when br.od_90_inv_amt_w_6m is null and cr.od_90_inv_amt_w_6m is null and lr.od_90_inv_amt_w_6m is null then null
+    else nvl(br.od_90_inv_amt_w_6m, 0) + nvl(cr.od_90_inv_amt_w_6m, 0) + nvl(lr.od_90_inv_amt_w_6m, 0)
+  end as loan_od_90_inv_amt_w_6m,
+  case
+    when br.od_inv_amt_w_6m is null and cr.od_inv_amt_w_6m is null and lr.od_inv_amt_w_6m is null then null
+    else nvl(br.od_inv_amt_w_6m, 0) + nvl(cr.od_inv_amt_w_6m, 0) + nvl(lr.od_inv_amt_w_6m, 0)
+  end as loan_od_inv_amt_w_6m,
+  case
+    when bu.days_since_last_bnpl_usage is null and cu.days_since_last_credit_usage is null and lu.days_since_last_lease_usage is null then null
+    else least(nvl(bu.days_since_last_bnpl_usage, 9999), nvl(cu.days_since_last_credit_usage, 9999), nvl(lu.days_since_last_lease_usage, 9999))
+  end as days_since_last_loan_usage,
+  case
+    when br.od_180_inv_amt_w_2y is null and cr.od_180_inv_amt_w_2y is null and lr.od_180_inv_amt_w_2y is null then null
+    else nvl(br.od_180_inv_amt_w_2y, 0) + nvl(cr.od_180_inv_amt_w_2y, 0) + nvl(lr.od_180_inv_amt_w_2y, 0)
+  end as loan_od_180_inv_amt_w_2y,
+  case
+    when br.od_15_inv_amt_w_6m is null and cr.od_15_inv_amt_w_6m is null and lr.od_15_inv_amt_w_6m is null then null
+    else nvl(br.od_15_inv_amt_w_6m, 0) + nvl(cr.od_15_inv_amt_w_6m, 0) + nvl(lr.od_15_inv_amt_w_6m, 0)
+  end as loan_od_15_inv_amt_w_6m,
+  case
+    when bu.bnpl_usage_amt_w_2y is null and cu.credit_usage_amt_w_2y is null and lu.lease_usage_amt_w_2y is null then null
+    else nvl(bu.bnpl_usage_amt_w_2y, 0) + nvl(cu.credit_usage_amt_w_2y, 0) + nvl(lu.lease_usage_amt_w_2y, 0)
+  end as loan_usage_amt_w_2y,
+  case
+    when br.od_30_inv_amt_w_6m is null and cr.od_30_inv_amt_w_6m is null and lr.od_30_inv_amt_w_6m is null then null
+    else nvl(br.od_30_inv_amt_w_6m, 0) + nvl(cr.od_30_inv_amt_w_6m, 0) + nvl(lr.od_30_inv_amt_w_6m, 0)
+  end as loan_od_30_inv_amt_w_6m,
+  case
+    when cr.instant_inv_cnt_w_6m is null and lr.instant_inv_cnt_w_6m is null then null
+    else nvl(cr.instant_inv_cnt_w_6m, 0) + nvl(lr.instant_inv_cnt_w_6m, 0)
+  end as loan_instant_inv_cnt_w_6m,
+  case
+    when bu.bnpl_usage_amt_w_3m is null and cu.credit_usage_amt_w_3m is null and lu.lease_usage_amt_w_3m is null then null
+    else nvl(bu.bnpl_usage_amt_w_3m, 0) + nvl(cu.credit_usage_amt_w_3m, 0) + nvl(lu.lease_usage_amt_w_3m, 0)
+  end as loan_usage_amt_w_3m,
+  case
+    when br.od_inv_amt_w_1y is null and cr.od_inv_amt_w_1y is null and lr.od_inv_amt_w_1y is null then null
+    else nvl(br.od_inv_amt_w_1y, 0) + nvl(cr.od_inv_amt_w_1y, 0) + nvl(lr.od_inv_amt_w_1y, 0)
+  end as loan_od_inv_amt_w_1y,
+  case
+    when br.od_30_inv_cnt_w_6m is null and cr.od_30_inv_cnt_w_6m is null and lr.od_30_inv_cnt_w_6m is null then null
+    else nvl(br.od_30_inv_cnt_w_6m, 0) + nvl(cr.od_30_inv_cnt_w_6m, 0) + nvl(lr.od_30_inv_cnt_w_6m, 0)
+  end as loan_od_30_inv_cnt_w_6m,
+  case
+    when br.od_30_inv_amt_w_1y is null and cr.od_30_inv_amt_w_1y is null and lr.od_30_inv_amt_w_1y is null then null
+    else nvl(br.od_30_inv_amt_w_1y, 0) + nvl(cr.od_30_inv_amt_w_1y, 0) + nvl(lr.od_30_inv_amt_w_1y, 0)
+  end as loan_od_30_inv_amt_w_1y,
+  case
+    when br.od_inv_amt_w_2y is null and cr.od_inv_amt_w_2y is null and lr.od_inv_amt_w_2y is null then null
+    else nvl(br.od_inv_amt_w_2y, 0) + nvl(cr.od_inv_amt_w_2y, 0) + nvl(lr.od_inv_amt_w_2y, 0)
+  end as loan_od_inv_amt_w_2y,
+  case
+    when br.od_30_inv_amt_w_2y is null and cr.od_30_inv_amt_w_2y is null and lr.od_30_inv_amt_w_2y is null then null
+    else nvl(br.od_30_inv_amt_w_2y, 0) + nvl(cr.od_30_inv_amt_w_2y, 0) + nvl(lr.od_30_inv_amt_w_2y, 0)
+  end as loan_od_30_inv_amt_w_2y,
+  case
+    when bu.bnpl_usage_cnt_w_2y is null and cu.credit_usage_cnt_w_2y is null and lu.lease_usage_cnt_w_2y is null then null
+    else nvl(bu.bnpl_usage_cnt_w_2y, 0) + nvl(cu.credit_usage_cnt_w_2y, 0) + nvl(lu.lease_usage_cnt_w_2y, 0)
+  end as loan_usage_cnt_w_2y,
+  case
+    when br.od_60_inv_amt_w_2y is null and cr.od_60_inv_amt_w_2y is null and lr.od_60_inv_amt_w_2y is null then null
+    else nvl(br.od_60_inv_amt_w_2y, 0) + nvl(cr.od_60_inv_amt_w_2y, 0) + nvl(lr.od_60_inv_amt_w_2y, 0)
+  end as loan_od_60_inv_amt_w_2y,
+  case
+    when cr.instant_inv_amt_w_2y is null and lr.instant_inv_amt_w_2y is null then null
+    else nvl(cr.instant_inv_amt_w_2y, 0) + nvl(lr.instant_inv_amt_w_2y, 0)
+  end as loan_instant_inv_amt_w_2y
+
+from t_temp_union_pool t
+
+left join t_user_score_age_temp                  ag  on t.user_id = ag.user_id  and t.base_month = ag.base_month
+left join t_user_score_gaming_temp            g   on t.user_id = g.user_id   and t.base_month = g.base_month
+left join t_user_score_parking_temp           pk  on t.user_id = pk.user_id  and t.base_month = pk.base_month
+left join t_user_score_service_temp           svc on t.user_id = svc.user_id and t.base_month = svc.base_month
+left join t_user_score_service_more_temp      sm  on t.user_id = sm.user_id  and t.base_month = sm.base_month
+left join t_user_score_car_ownership_temp     co  on t.user_id = co.user_id  and t.base_month = co.base_month
+left join t_user_score_transaction_temp       txn on t.user_id = txn.user_id and t.base_month = txn.base_month
+left join t_user_score_wallet_temp            wlt on t.user_id = wlt.user_id and t.base_month = wlt.base_month
+left join t_user_score_fire_temp              fr  on t.user_id = fr.user_id  and t.base_month = fr.base_month
+left join t_user_score_kyc_temp               kyc on t.user_id = kyc.user_id and t.base_month = kyc.base_month
+left join t_user_score_mp_usage_temp          mp  on t.user_id = mp.user_id  and t.base_month = mp.base_month
+left join t_user_score_number_value_temp      nv  on t.user_id = nv.user_id  and t.base_month = nv.base_month
+left join t_user_score_tenure_temp            te  on t.user_id = te.user_id  and t.base_month = te.base_month
+left join t_user_score_all_limit_usage_temp   alu on t.user_id = alu.user_id and t.base_month = alu.base_month
+left join t_user_score_all_request_temp       ar  on t.user_id = ar.user_id  and t.base_month = ar.base_month
+left join t_user_score_bnpl_repayment_temp    br  on t.user_id = br.user_id  and t.base_month = br.base_month
+left join t_user_score_bnpl_usage_temp        bu  on t.user_id = bu.account_id  and t.base_month = bu.base_month
+left join t_user_score_credit_repayment_temp  cr  on t.user_id = cr.user_id  and t.base_month = cr.base_month
+left join t_user_score_credit_usage_temp      cu  on t.user_id = cu.user_id  and t.base_month = cu.base_month
+left join t_user_score_lease_repayment_temp   lr  on t.user_id = lr.user_id  and t.base_month = lr.base_month
+left join t_user_score_lease_usage_temp       lu  on t.user_id = lu.userid   and t.base_month = lu.base_month;
+
+drop table t_user_score_wallet_temp;
+drop table t_user_score_transaction_temp;
+drop table t_user_score_tenure_temp;
+drop table t_user_score_service_more_temp;
+drop table t_user_score_parking_temp;
+drop table t_user_score_number_value_temp;
+drop table t_user_score_mp_usage_temp;
+drop table t_user_score_kyc_temp;
+drop table t_user_score_gaming_temp;
+drop table t_user_score_fire_temp;
+drop table t_user_score_car_ownership_temp;
+drop table t_user_score_all_request_temp;
+drop table t_user_score_all_limit_usage_temp;
+drop table t_user_score_bnpl_repayment_temp;
+drop table t_user_score_credit_repayment_temp;
+drop table t_user_score_lease_repayment_temp;
+drop table t_user_score_credit_usage_temp;
+drop table t_user_score_lease_usage_temp;
+drop table t_user_score_age_temp;
+drop table t_user_score_bnpl_usage_temp;

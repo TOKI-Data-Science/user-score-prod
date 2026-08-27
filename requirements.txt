@@ -6,3 +6,7 @@ sqlalchemy
 oracledb
 loguru
 pandas
+numpy
+joblib
+scorecardpy
+openpyxl

@@ -21,6 +21,9 @@ RUN /opt/conda/bin/conda env update -n base -f environment.yml
 COPY script.py /myapp
 # Copy source code
 COPY src/ /myapp/src
+# Copy scorecard models and reason code library used by build_user_score()
+COPY models/ /myapp/models
+COPY data/ /myapp/data
 
 # Execute command
 CMD ["python3", "script.py"]

@@ -73,9 +73,9 @@ def enforce_non_downgrade(df, mob_col):
 
 
 @logging_timer(entry=True, exit=True)
-def build_target_pool():
+def build_target_pool(report=None):
     """Runs target_pool.sql, enriches the result in pandas, and writes it back to Oracle"""
-    oracle_execute_script(TARGET_POOL_SQL)
+    oracle_execute_script(TARGET_POOL_SQL, report=report, step='build_target_pool')
 
     target = oracle_import(
         f'select user_id, base_month, product, mob, model_od from {TARGET_POOL_TABLE}'

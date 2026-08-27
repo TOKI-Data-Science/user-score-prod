@@ -1,4 +1,5 @@
 import math
+from contextlib import nullcontext
 
 import pandas as pd
 from sqlalchemy import URL, create_engine, types
@@ -65,6 +66,21 @@ def oracle_export(data_frame, table_name, index=False, if_exists='replace'):
 
 
 @logging_timer()
+def oracle_upsert_by_column(data_frame, table_name, key_column):
+    """Append to a history table, replacing any existing rows for the same key_column values.
+    Creates the table on first run since it won't exist yet."""
+    if oracle_table_exists(table_name):
+        keys = ', '.join(str(int(v)) for v in data_frame[key_column].unique())
+        engine = create_engine(oracle_connection_url)
+        with engine.connect() as connection:
+            connection.execute(text(f'delete from {table_name} where {key_column} in ({keys})'))
+            connection.commit()
+        oracle_export(data_frame, table_name, if_exists='append')
+    else:
+        oracle_export(data_frame, table_name, if_exists='replace')
+
+
+@logging_timer()
 def oracle_execute(query):
     """Executes query"""
     engine = create_engine(oracle_connection_url)
@@ -74,21 +90,55 @@ def oracle_execute(query):
 
 
 @logging_timer()
-def oracle_execute_script(filepath):
+def oracle_execute_script(filepath, report=None, step=None):
     """Execute a ';'-separated multi-statement sql file, one statement at a time.
     'drop table' statements are best-effort so reruns don't fail on a missing table.
+    Before each 'create table' statement, the target table is dropped if it already exists.
+    If 'report' (a RunReport) and 'step' are given, each statement is tracked as its own
+    table-level row (named after its target table, or 'statement N' if not a create/drop).
     """
     statements = [s.strip() for s in sql_open(filepath).split(';') if s.strip()]
     engine = create_engine(oracle_connection_url)
     with engine.connect() as connection:
-        for statement in statements:
-            try:
-                connection.execute(text(statement))
-                connection.commit()
-            except Exception:
-                if statement.lower().startswith('drop table'):
-                    continue
-                raise
+        for i, statement in enumerate(statements, start=1):
+            # strip leading '--' comment lines so 'create table' detection isn't fooled by them
+            body_lines = [line for line in statement.splitlines() if not line.strip().startswith('--')]
+            body = '\n'.join(body_lines).strip()
+            if not body:
+                # entire statement is commented out, nothing to execute
+                continue
+            lowered = body.lower()
+            tokens = body.split()
+            lowered_tokens = [t.lower() for t in tokens[:4]]
+            is_create = lowered.startswith('create table') or lowered.startswith('create or replace table')
+            is_drop = lowered.startswith('drop table')
+            if is_create or is_drop:
+                table_name = tokens[lowered_tokens.index('table') + 1] if 'table' in lowered_tokens else None
+            else:
+                table_name = None
+            label = table_name or f'statement {i}'
+            if is_drop:
+                label = f'drop {label}'
+
+            tracker = report.track_table(step, label) if report else nullcontext()
+            with tracker:
+                if is_create and table_name and oracle_table_exists(table_name):
+                    connection.execute(text(f'drop table {table_name}'))
+                    connection.commit()
+                try:
+                    connection.execute(text(statement))
+                    connection.commit()
+                except Exception:
+                    if is_drop:
+                        continue
+                    raise
+
+
+@logging_timer()
+def oracle_table_exists(table_name):
+    """Check whether a table exists in the connected Oracle schema"""
+    query = f"select count(*) from user_tables where table_name = '{table_name.upper()}'"
+    return oracle_import(query).iloc[0, 0] > 0
 
 
 @logging_timer()
