@@ -1831,9 +1831,7 @@ select
   t.mob_group,
   t.base_month,
   t.mob,
-  t.active_mob,
   t.model_od,
-  t.model_event,
 
   ag.age,
 
