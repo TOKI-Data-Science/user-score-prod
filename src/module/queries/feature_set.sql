@@ -531,6 +531,7 @@ service_raw AS (
     SELECT DISTINCT
         d.user_id,
         d.base_month,
+        TO_NUMBER(TO_CHAR(TO_DATE(a.transaction_date, 'yyyy-mm-dd'), 'yyyymm')) AS transaction_month,
         b.service_name AS merchant_name,
         c.category AS merchant_group,
         CASE WHEN TO_NUMBER(TO_CHAR(TO_DATE(a.transaction_date, 'yyyy-mm-dd'), 'yyyymm')) >=
@@ -551,7 +552,12 @@ service_raw AS (
 SELECT 
     user_id,
     base_month,
-    COUNT(DISTINCT CASE WHEN is_w1m = 1 THEN merchant_group END) AS merchant_group_count_w_1m
+    COUNT(DISTINCT CASE WHEN is_w1m = 1 THEN merchant_group END) AS merchant_group_count_w_1m,
+    COUNT(DISTINCT CASE WHEN is_w3m = 1 AND merchant_name IN ('Unitel Payment', 'Gmobile Payment', 'Skytel Payment', 'Univision Payment')
+        THEN transaction_month || '|' || merchant_name END)                                            AS data_payment_count_sum_w3m,
+    COUNT(DISTINCT CASE WHEN merchant_name IN ('Umoney', 'Taxi', 'Domestic Bus')
+        THEN transaction_month || '|' || merchant_name END)                                            AS transport_count_sum_w6m
+
 FROM service_raw
 GROUP BY user_id, base_month;
 
@@ -1675,7 +1681,7 @@ daily_usage as (
     sum(product_price)                                                                       as credit_usage_amt_w_2y,
     sum(case when usage_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -12) then product_price end)                 as credit_usage_amt_w_1y,
     sum(case when usage_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -3) then product_price end)                 as credit_usage_amt_w_3m,
-    to_date(to_char(base_month), 'yyyymm') - max(trunc(created_date))                                                                 as max_usage_date
+    to_date(to_char(base_month), 'yyyymm') - max(trunc(created_date))                                                                 as days_since_last_credit_usage
 
   from base_data
   group by user_id, base_month;
@@ -1835,8 +1841,8 @@ select
 
   pk.sum_parking_amt_w_6m,
 
-  svc.data_payment_count_sum_w3m,
-  svc.transport_count_sum_w6m,
+  sm.data_payment_count_sum_w3m,
+  sm.transport_count_sum_w6m,
 
   sm.merchant_group_count_w_1m,
 
@@ -1979,7 +1985,6 @@ from t_temp_union_pool t
 left join t_user_score_age_temp                  ag  on t.user_id = ag.user_id  and t.base_month = ag.base_month
 left join t_user_score_gaming_temp            g   on t.user_id = g.user_id   and t.base_month = g.base_month
 left join t_user_score_parking_temp           pk  on t.user_id = pk.user_id  and t.base_month = pk.base_month
-left join t_user_score_service_temp           svc on t.user_id = svc.user_id and t.base_month = svc.base_month
 left join t_user_score_service_more_temp      sm  on t.user_id = sm.user_id  and t.base_month = sm.base_month
 left join t_user_score_car_ownership_temp     co  on t.user_id = co.user_id  and t.base_month = co.base_month
 left join t_user_score_transaction_temp       txn on t.user_id = txn.user_id and t.base_month = txn.base_month
