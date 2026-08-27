@@ -140,6 +140,7 @@ dmypy.json
 data/*/*
 data/**
 !data/README.md
+!data/reason_code_library_2.xlsx
 
 # PL/SQL file created when editing .sql
 *.~sql
