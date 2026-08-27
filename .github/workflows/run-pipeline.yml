@@ -1,0 +1,30 @@
+name: Run pipeline
+
+on:
+  schedule:
+    # 11:00 Asia/Ulaanbaatar (UTC+8) on the 2nd of every month = 03:00 UTC
+    - cron: "0 3 2 * *"
+  workflow_dispatch: {}
+
+jobs:
+  run-pipeline:
+    runs-on: [self-hosted, prod, container]
+    environment: production
+    steps:
+      - name: Run user-score-prod image
+        env:
+          ORACLE_USERNAME: ${{ secrets.ORACLE_USERNAME }}
+          ORACLE_PASSWORD: ${{ secrets.ORACLE_PASSWORD }}
+          ORACLE_HOSTNAME: ${{ secrets.ORACLE_HOSTNAME }}
+          ORACLE_PORT: ${{ secrets.ORACLE_PORT }}
+          ORACLE_SERVICE: ${{ secrets.ORACLE_SERVICE }}
+          LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
+        run: |
+          docker run --rm \
+            -e ORACLE_USERNAME \
+            -e ORACLE_PASSWORD \
+            -e ORACLE_HOSTNAME \
+            -e ORACLE_PORT \
+            -e ORACLE_SERVICE \
+            -e LOG_LEVEL \
+            user-score-prod:v1.0.0
