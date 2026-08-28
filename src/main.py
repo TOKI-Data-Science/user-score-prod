@@ -15,8 +15,8 @@ def main():
         #     build_target_pool(report=report)
         # with report.track('build_feature_set'):
         #     build_feature_set(report=report)
-        with report.track('build_inactive_tag'):
-            build_inactive_tag(report=report)
+        #with report.track('build_inactive_tag'):
+        #    build_inactive_tag(report=report)
         with report.track('build_user_score'):
             build_user_score()
     finally:
