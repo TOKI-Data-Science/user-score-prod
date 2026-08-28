@@ -10,3 +10,4 @@ numpy
 joblib
 scorecardpy
 openpyxl
+pyarrow
