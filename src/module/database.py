@@ -30,7 +30,7 @@ def sql_col(data_frame):
     """Convert python data types to sql data types"""
     dtypes_dict = {}
     for column, dtype in zip(data_frame.columns, data_frame.dtypes):
-        if "object" in str(dtype):
+        if "object" in str(dtype) or "category" in str(dtype):
             lengths = data_frame[column].dropna().astype(str).str.len()
             str_max_len = col_length(lengths.max() if not lengths.empty else 1)
             dtypes_dict.update({column: types.VARCHAR(length=str_max_len)})

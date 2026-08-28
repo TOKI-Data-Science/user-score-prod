@@ -390,7 +390,7 @@ def score_and_reason(df_raw):
     ).clip(lower=200)
     df['user_score_bin'] = pd.cut(
         df['user_score'], bins=SCORE_BINS, right=False, labels=SCORE_BIN_LABELS
-    )
+    ).astype(str)
 
     return df[
         ['user_id', 'base_month', 'model_group', 'user_score', 'user_score_bin']
