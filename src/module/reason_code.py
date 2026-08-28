@@ -349,6 +349,8 @@ def score_and_reason(df_raw):
         df[col] = np.nan
 
         mask = df['model_group'] == grp
+        if grp == 'mob0':
+            mask = mask | df['model_group'].isna()
         if not mask.any():
             continue
 
@@ -391,9 +393,10 @@ def score_and_reason(df_raw):
     df['user_score_bin'] = pd.cut(
         df['user_score'], bins=SCORE_BINS, right=False, labels=SCORE_BIN_LABELS
     ).astype(str)
+    df[dim_cols] = df[dim_cols].fillna(1)
 
     return df[
-        ['user_id', 'base_month', 'model_group', 'user_score', 'user_score_bin']
+        ['user_id', 'base_month', 'user_score', 'user_score_bin']
         + rc_cols
         + sig_cols
         + dim_cols
