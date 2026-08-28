@@ -210,7 +210,7 @@ create table t_user_score_inactive_tag as
 select distinct
   a.*,
   case
-    when nvl(a.loan_usage_cnt_w_1y, 0) = 0 and (nvl(a.loan_ontime_inv_cnt_w_1y, 0) + nvl(a.loan_od_inv_cnt_w_1y, 0)) = 0 and nvl(total_balance, 0) = 0 then 1
+    when nvl(a.loan_usage_amt_w_1y, 0) = 0 and (nvl(a.loan_od_inv_amt_w_1y, 0)) = 0 and nvl(total_balance, 0) = 0 then 1
     else 0 end as is_inactive_w_12m
 from t_user_score_feature_set_temp a
 left join t_user_score_balance_temp b on a.user_id = b.user_id and a.base_month = b.base_month;
