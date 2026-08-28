@@ -320,8 +320,6 @@ def _prepare(df_raw):
     fill_cols = [c for c in numeric_cols if c not in excluded_cols]
     df[fill_cols] = df[fill_cols].fillna(0)
 
-    df['mob_gap'] = df['mob'] - df['active_mob']
-
     conditions = [
         (df['mob_group'] == '0') & (df['model_od'] < 90) & (df['is_inactive_w_12m'] == 1),
         (df['mob_group'] == '1-6') & (df['model_od'] < 90) & (df['is_inactive_w_12m'] == 0),
