@@ -81,7 +81,7 @@ repayment_aggregation as (
   from invoice_raw i
   right join user_pool m on i.user_id = m.user_id
   where to_number(substr(to_char(i.invoice_date), 1, 6))
-    between to_number(to_char(add_months(to_date(to_char(m.base_month), 'yyyymm'), -m.mob), 'yyyymm'))
+    between to_number(to_char(add_months(to_date(to_char(m.base_month), 'yyyymm'), -6), 'yyyymm'))
         and to_number(to_char(add_months(last_day(to_date(to_char(m.base_month), 'yyyymm')), 12), 'yyyymm'))
   group by i.loan_request_id, i.invoice_id, i.loan_type, i.loan_request_amt, i.invoice_amt, m.base_month, m.mob
 ),
@@ -107,7 +107,7 @@ calculated_od as (
     end as is_paid,
     case
       when to_number(substr(to_char(i.invoice_date), 1, 6)) between
-           to_number(to_char(add_months(to_date(to_char(m.base_month), 'yyyymm'), -m.mob), 'yyyymm'))
+           to_number(to_char(add_months(to_date(to_char(m.base_month), 'yyyymm'), -6), 'yyyymm'))
            and m.base_month
       then
         case
@@ -138,7 +138,7 @@ calculated_od as (
   right join user_pool m on i.user_id = m.user_id
   left join repayment_aggregation r on i.loan_request_id = r.loan_request_id and i.invoice_id = r.invoice_id and m.base_month = r.base_month
   where to_number(substr(to_char(i.invoice_date), 1, 6))
-    between to_number(to_char(add_months(to_date(to_char(m.base_month), 'yyyymm'), -m.mob), 'yyyymm'))
+    between to_number(to_char(add_months(to_date(to_char(m.base_month), 'yyyymm'), -6), 'yyyymm'))
         and to_number(to_char(add_months(last_day(to_date(to_char(m.base_month), 'yyyymm')), 12), 'yyyymm'))
 )
 select
@@ -185,7 +185,7 @@ with tmp_credit_invoice as (
     i.fully_paid_date,
     i.due_date,
     case
-      when trunc(i.due_date) between add_months(to_date(b.p_date, 'yyyymmdd'), -b.mob)
+      when trunc(i.due_date) between add_months(to_date(b.p_date, 'yyyymmdd'), -6)
                                  and to_date(b.p_date, 'yyyymmdd')
       then
         case
@@ -201,7 +201,7 @@ with tmp_credit_invoice as (
   from toki.credit_invoice i
   inner join toki.credit_credit cc on i.credit_id = cc.credit_id   
   right join t_temp_credit_pool b on cc.user_id = b.user_id
-    and trunc(i.due_date) between add_months(to_date(b.p_date, 'yyyymmdd'), -b.mob)
+    and trunc(i.due_date) between add_months(to_date(b.p_date, 'yyyymmdd'), -6)
                               and add_months(to_date(b.p_date, 'yyyymmdd'), 12)
     and i.invoice_type = 'MONTHLY'
 )
@@ -270,7 +270,7 @@ handset_combined as (
         to_number(to_char(trunc(rep.createdat), 'yyyymmdd')) as paid_date,
         to_number(to_char(trunc(a.due_date), 'yyyymmdd')) as due_date,
         case
-            when trunc(a.due_date) between add_months(to_date(d.p_date, 'yyyymmdd'), -d.mob)
+            when trunc(a.due_date) between add_months(to_date(d.p_date, 'yyyymmdd'), -6)
                                        and to_date(d.p_date, 'yyyymmdd')
             then
                 case
@@ -285,7 +285,7 @@ handset_combined as (
     inner join toki.handset_orders b on to_number(a.loan_id) = b.loanid
     inner join toki.handset_loan c on a.loan_id = c.id
     right join t_temp_lease_pool d on b.nationalid = d.ssn
-        and trunc(a.due_date) between add_months(to_date(d.p_date, 'yyyymmdd'), -d.mob)
+        and trunc(a.due_date) between add_months(to_date(d.p_date, 'yyyymmdd'), -6)
                                   and add_months(to_date(d.p_date, 'yyyymmdd'), 12)
     where a.invoice_type = 'SCHEDULED' --and c.is_staff_deal = 0
 ) 
