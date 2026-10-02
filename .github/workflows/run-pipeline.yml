@@ -2,8 +2,8 @@ name: Run pipeline
 
 on:
   schedule:
-    # 11:00 Asia/Ulaanbaatar (UTC+8) on the 2nd of every month = 03:00 UTC
-    - cron: "0 3 2 * *"
+    # 11:00 Asia/Ulaanbaatar (UTC+8) on the 3rd of every month = 03:00 UTC
+    - cron: "0 3 3 * *"
   workflow_dispatch: {}
 
 jobs:

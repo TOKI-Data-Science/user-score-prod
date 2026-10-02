@@ -32,6 +32,7 @@ def build_inactive_tag(report=None):
 
     df = oracle_import(f'select * from {INACTIVE_TAG_TABLE}')
     df.columns = df.columns.str.lower()
+    df = df.drop(columns=['register_based_id'], errors='ignore')
     oracle_export(df, f'{INACTIVE_TAG_TABLE}_{datetime.now():%Y%m}')
     oracle_upsert_by_column(df, RAW_HISTORY_TABLE, 'base_month')
     return df

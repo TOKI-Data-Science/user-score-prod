@@ -304,28 +304,65 @@ inner join toki.dpr_maat_customers b on lower(a.ssn) = lower(b.id_value)
 and to_number(to_char(trunc(b.created_on), 'yyyymm')) <= to_number(substr(to_char(a.p_date), 1, 6))
 ;
 
-create table t_temp_mongo_pool as
-WITH base_data AS (
-    SELECT
-        a.identifier AS user_id,
-        TO_NUMBER(TO_CHAR(TRUNC(b.contract_date), 'YYYYMM'))    AS contract_month,
-        case when a.current_state not in 'ACTIVE' then TO_NUMBER(TO_CHAR(TRUNC(c.lastactivitytime), 'YYYYMM')) else null end as end_month
-    FROM toki.dpr_maat_customers a
-    INNER JOIN t_mongo_contract b ON a.identifier = b.id_
-       AND a.customer_type = 'REGISTERED'
-    left join toki.mongo_userarchives c ON a.identifier = c.id_
-)
+-- CREATE TABLE t_temp_mongo_pool AS
+-- WITH run_parameters AS (
+--   SELECT TO_NUMBER(TO_CHAR(SYSDATE - 1, 'YYYYMM')) AS base_month
+--   FROM dual
+-- ), mongo_contracts AS (
+--   SELECT
+--     id_,
+--     CASE
+--       WHEN REGEXP_LIKE(timestamp_ms, '^[0-9]{13}$')
+--       THEN DATE '1970-01-01' + TO_NUMBER(timestamp_ms) / 86400000
+--     END AS contract_date
+--   FROM (
+--     SELECT
+--       id_,
+--       COALESCE(
+--         REGEXP_SUBSTR(imsaccount, 'signedAt[^0-9]*([0-9]{13})', 1, 1, NULL, 1),
+--         REGEXP_SUBSTR(imsaccount, 'FILE_([0-9]{13})', 1, 1, NULL, 1),
+--         REGEXP_SUBSTR(imsaccount, 'IDENTIFIER_([0-9]{13})', 1, 1, NULL, 1)
+--       ) AS timestamp_ms
+--     FROM toki.mongo_users
+--   ) parsed_users
+-- ), base_data AS (
+--   SELECT
+--     customer.identifier AS user_id,
+--     TO_NUMBER(TO_CHAR(TRUNC(contract.contract_date), 'YYYYMM')) AS contract_month,
+--     CASE
+--       WHEN customer.current_state NOT IN ('ACTIVE')
+--       THEN TO_NUMBER(TO_CHAR(TRUNC(archive.lastactivitytime), 'YYYYMM'))
+--     END AS end_month
+--   FROM toki.dpr_maat_customers customer
+--   LEFT JOIN mongo_contracts contract
+--     ON customer.identifier = contract.id_
+--      AND customer.customer_type = 'REGISTERED'
+--   LEFT JOIN toki.mongo_userarchives archive
+--     ON customer.identifier = archive.id_
+-- )
+-- SELECT
+--   data.user_id,
+--   parameters.base_month,
+--   0 AS mob,
+--   0 AS model_od
+-- FROM base_data data
+-- CROSS JOIN run_parameters parameters
+-- WHERE data.contract_month <= parameters.base_month
+--   AND (data.end_month IS NULL OR data.end_month >= parameters.base_month)
+-- ORDER BY data.user_id;
+
+CREATE TABLE t_temp_mongo_pool AS
 SELECT
-    b.user_id,
-    TO_NUMBER(TO_CHAR(SYSDATE - 1, 'YYYYMM')) AS base_month,
-    0 AS mob,
-    0 AS model_od
-FROM base_data b
-WHERE b.contract_month <= TO_NUMBER(TO_CHAR(SYSDATE - 1, 'YYYYMM'))
-  AND (b.end_month IS NULL OR b.end_month >= TO_NUMBER(TO_CHAR(SYSDATE - 1, 'YYYYMM')))
-ORDER BY b.user_id;
+  identifier AS user_id,
+  TO_NUMBER(TO_CHAR(SYSDATE - 1, 'YYYYMM')) AS base_month,
+  0 AS mob,
+  0 AS model_od
+FROM toki.dpr_maat_customers
+WHERE customer_type = 'REGISTERED'
+  AND current_state = 'ACTIVE';
 
 create table t_temp_union_pool as
+select a.*, c.register_based_id from (
 select distinct user_id, base_month, product, mob, model_od
 from (
   select user_id, to_number(substr(to_char(p_date), 1, 6)) as base_month, 'credit' as product, mob, model_od
@@ -347,7 +384,17 @@ from (
   select user_id, base_month, 'other' as product, mob, model_od
   from t_temp_mongo_pool
 )
-where user_id is not null;
+where user_id is not null
+) a
+left join toki.dpr_maat_customers b on a.user_id = b.identifier
+left join toki.t_toki_user_identity c on lower(b.id_value) = lower(c.ssn);
+
+create table t_temp_user_map as
+select distinct
+  coalesce(c.register_based_id, b.identifier) as register_based_id,
+  b.identifier as user_id
+from toki.dpr_maat_customers b
+left join toki.t_toki_user_identity c on lower(b.id_value) = lower(c.ssn);
 
 drop table t_temp_bnpl_pool;
 drop table t_temp_bnpl_pool_od;

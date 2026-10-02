@@ -8,7 +8,6 @@ from sqlalchemy.sql import text
 from src.module.helper import logging_timer
 from src.module.settings import settings
 
-# oracle connection string for SQL alchemy engine
 oracle_connection_url = URL.create(
     drivername='oracle+oracledb',
     password=settings.oracle_password,
@@ -102,11 +101,9 @@ def oracle_execute_script(filepath, report=None, step=None):
     engine = create_engine(oracle_connection_url)
     with engine.connect() as connection:
         for i, statement in enumerate(statements, start=1):
-            # strip leading '--' comment lines so 'create table' detection isn't fooled by them
             body_lines = [line for line in statement.splitlines() if not line.strip().startswith('--')]
             body = '\n'.join(body_lines).strip()
             if not body:
-                # entire statement is commented out, nothing to execute
                 continue
             lowered = body.lower()
             tokens = body.split()

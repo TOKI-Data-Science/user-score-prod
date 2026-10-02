@@ -34,13 +34,13 @@ def mob_rank_from_value(mob):
         return 3
 
 
-def enforce_non_downgrade(df, mob_col):
-    """A user's mob should never decrease month over month; correct data glitches that imply it did"""
-    df = df.sort_values(['user_id', 'base_month']).copy()
+def enforce_non_downgrade(df, mob_col, key_col='register_based_id'):
+    """A register's mob should never decrease month over month; correct data glitches that imply it did"""
+    df = df.sort_values([key_col, 'base_month']).copy()
     month_dt = pd.to_datetime(df['base_month'].astype(str), format='%Y%m', errors='coerce').dt.to_period('M')
     corrected = df[mob_col].astype(float).copy()
 
-    for _, idx in df.groupby('user_id', sort=False).groups.items():
+    for _, idx in df.groupby(key_col, sort=False).groups.items():
         idx = list(idx)
         for j in range(1, len(idx)):
             i_prev = idx[j - 1]
@@ -78,22 +78,29 @@ def build_target_pool(report=None):
     oracle_execute_script(TARGET_POOL_SQL, report=report, step='build_target_pool')
 
     target = oracle_import(
-        f'select user_id, base_month, product, mob, model_od from {TARGET_POOL_TABLE}'
+        f'select user_id, register_based_id, base_month, product, mob, model_od from {TARGET_POOL_TABLE}'
     )
     target.columns = target.columns.str.lower()
     target = target.dropna(subset=['user_id'])
+
+    target['register_based_id'] = target['register_based_id'].fillna(target['user_id'])
     target.drop_duplicates(inplace=True)
     target['model_od'] = target['model_od'].fillna(0)
 
-    target_agg = (
-        target.groupby(['user_id', 'base_month'], as_index=False)
+    register_agg = (
+        target.groupby(['register_based_id', 'base_month'], as_index=False)
         .agg(
             mob=('mob', 'max'),
             model_od=('model_od', 'max'),
         )
     )
+    register_agg = enforce_non_downgrade(register_agg, 'mob')
 
-    target_agg = enforce_non_downgrade(target_agg, 'mob')
+    target_agg = (
+        target[['register_based_id', 'user_id', 'base_month']]
+        .drop_duplicates()
+        .merge(register_agg, on=['register_based_id', 'base_month'], how='inner')
+    )
     target_agg['mob_group'] = target_agg['mob'].apply(mob_to_group)
 
     target_agg = target_agg[target_agg['mob'] >= 0]

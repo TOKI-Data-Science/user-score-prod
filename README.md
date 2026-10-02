@@ -11,7 +11,9 @@ Runs 4 sequential steps, each depending on the previous step's output table:
 
 1. **`build_target_pool()`** ([src/module/target_pool.py](src/module/target_pool.py)) - runs
    `target_pool.sql`, enriches with pandas (mob correction/grouping), writes
-   `t_temp_union_pool`.
+   `t_temp_union_pool` (one row per `user_id`, with `register_based_id` and the
+   register's `mob`/`model_od`). `target_pool.sql` also builds `t_temp_user_map`
+   (`register_based_id`, `user_id`), which lists every user_id a register has had.
 2. **`build_feature_set()`** ([src/module/feature_set.py](src/module/feature_set.py)) - runs
    `feature_set.sql`, writes `t_user_score_feature_set_temp`.
 3. **`build_inactive_tag()`** ([src/module/inactive_tag.py](src/module/inactive_tag.py)) - runs
@@ -24,11 +26,6 @@ Runs 4 sequential steps, each depending on the previous step's output table:
    `t_user_score_result_<yyyymm>`, and upserts into the permanent history table
    `t_user_score_result`.
 
-Each run also renders an HTML report to `reports/run_report_<timestamp>.html`
-via [src/module/run_report.py](src/module/run_report.py), showing every step
-and, for the SQL-driven steps, every individual table/statement with its
-start/end time, duration, and status - including the full traceback for any
-failure.
 
 ## To Run image
 
@@ -44,7 +41,7 @@ docker run --rm --env-file=$HOME/envs/oracle-template.env oracle-template:v0.1.0
 [.github/workflows/run-pipeline.yml](.github/workflows/run-pipeline.yml) runs
 the pipeline on a self-hosted runner (`production` environment):
 
-- **Schedule**: 11:00 Asia/Ulaanbaatar (UTC+8) on the 2nd of every month
+- **Schedule**: 11:00 Asia/Ulaanbaatar (UTC+8) on the 3rd of every month
 - **Manual trigger**: `workflow_dispatch`
 - Pulls Oracle credentials and `LOG_LEVEL` from the environment's secrets and
   runs the `user-score-prod:v1.0.0` image

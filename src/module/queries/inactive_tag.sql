@@ -28,21 +28,23 @@ lease_monthly as (
 ),
 lease_util as (
   select
-    a.user_id,
+    a.register_based_id,
     a.base_month,
     ms.year_month,
-    ms.total_loan_amt as balance,
-    ms.total_limit
-  from t_temp_union_pool a
-  inner join lease_monthly ms on ms.user_id = a.user_id
+    sum(ms.total_loan_amt) as balance,
+    sum(ms.total_limit)    as total_limit
+  from (select distinct register_based_id, base_month from t_temp_union_pool) a
+  inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+  inner join lease_monthly ms on ms.user_id = m.user_id
     and to_number(ms.year_month) between
         to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -12), 'yyyymm'))
         and to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -1), 'yyyymm'))
+  group by a.register_based_id, a.base_month, ms.year_month
 ),
 
 credit_monthly as (
   select
-    p.user_id,
+    p.register_based_id,
     p.base_month,
     c.credit_id,
     to_char(cch.created_date, 'yyyymm')                                                     as year_month,
@@ -50,36 +52,37 @@ credit_monthly as (
     coalesce(max(cch.balance) keep (dense_rank last order by cch.created_date), 0)          as balance
   from toki.credit_credit_history cch
   inner join toki.credit_credit c on cch.credit_id = c.credit_id
-  inner join t_temp_union_pool p on c.user_id = p.user_id
+  inner join t_temp_user_map m on c.user_id = m.user_id
+  inner join (select distinct register_based_id, base_month from t_temp_union_pool) p on m.register_based_id = p.register_based_id
   where cch.created_date is not null
     and to_number(to_char(cch.created_date, 'yyyymm')) between
         to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -12), 'yyyymm'))
         and to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -1), 'yyyymm'))
-  group by p.user_id, p.base_month, c.credit_id, to_char(cch.created_date, 'yyyymm')
+  group by p.register_based_id, p.base_month, c.credit_id, to_char(cch.created_date, 'yyyymm')
 ),
 credit_latest_month as (
-  select user_id, base_month, credit_id, max(year_month) as latest_month
+  select register_based_id, base_month, credit_id, max(year_month) as latest_month
   from credit_monthly
-  group by user_id, base_month, credit_id
+  group by register_based_id, base_month, credit_id
 ),
 latest_credit as (
-  select user_id, base_month, credit_id,
+  select register_based_id, base_month, credit_id,
     row_number() over (
-      partition by user_id, base_month
+      partition by register_based_id, base_month
       order by latest_month desc, credit_id desc
     ) as rn
   from credit_latest_month
 ),
 credit_util as (
   select
-    ms.user_id,
+    ms.register_based_id,
     ms.base_month,
     ms.year_month,
     ms.balance,
     ms.credit_limit as total_limit
   from latest_credit lc
   inner join credit_monthly ms
-    on ms.user_id = lc.user_id and ms.base_month = lc.base_month and ms.credit_id = lc.credit_id
+    on ms.register_based_id = lc.register_based_id and ms.base_month = lc.base_month and ms.credit_id = lc.credit_id
   where lc.rn = 1
 ),
 
@@ -179,42 +182,44 @@ bnpl_account_result as (
 ),
 bnpl_util as (
   select
-    a.user_id,
+    a.register_based_id,
     a.base_month,
     to_char(b.month, 'FM000000') as year_month,
     sum(b.latest_balance)        as balance,
     sum(b.latest_bnpl_limit)     as total_limit
-  from t_temp_union_pool a
-  inner join bnpl_account_result b on a.user_id = b.user_id
+  from (select distinct register_based_id, base_month from t_temp_union_pool) a
+  inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+  inner join bnpl_account_result b on m.user_id = b.user_id
     and b.month between
         to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -12), 'yyyymm'))
         and to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -1), 'yyyymm'))
-  group by a.user_id, a.base_month, b.month
+  group by a.register_based_id, a.base_month, b.month
 ),
 
 all_raw as (
-  select user_id, base_month, year_month, balance, total_limit from lease_util
+  select register_based_id, base_month, year_month, balance, total_limit from lease_util
   union all
-  select user_id, base_month, year_month, balance, total_limit from credit_util
+  select register_based_id, base_month, year_month, balance, total_limit from credit_util
   union all
-  select user_id, base_month, year_month, balance, total_limit from bnpl_util
+  select register_based_id, base_month, year_month, balance, total_limit from bnpl_util
 )
   select
-    user_id,
+    register_based_id,
     base_month,
     sum(balance) as total_balance
   from all_raw
-  group by user_id, base_month;
+  group by register_based_id, base_month;
 
-create table t_user_score_inactive_tag as 
+create table t_user_score_inactive_tag as
 select distinct
   a.*,
   case
     when nvl(a.loan_usage_amt_w_1y, 0) = 0 and (nvl(a.loan_od_inv_amt_w_1y, 0)) = 0 and nvl(total_balance, 0) = 0 then 1
     else 0 end as is_inactive_w_12m
 from t_user_score_feature_set_temp a
-left join t_user_score_balance_temp b on a.user_id = b.user_id and a.base_month = b.base_month;
+left join t_user_score_balance_temp b on a.register_based_id = b.register_based_id and a.base_month = b.base_month;
 
 drop table t_temp_union_pool;
+drop table t_temp_user_map;
 drop table t_user_score_balance_temp;
 drop table t_user_score_feature_set_temp;

@@ -19,27 +19,29 @@ with balance_raw as (
 ),
 balance_base as (
   select
-    a.user_id,
+    a.register_based_id,
     a.base_month,
     b.month,
-    b.avg_balance,
-    b.min_balance,
-    b.max_balance,
+    sum(b.avg_balance) as avg_balance,
+    sum(b.min_balance) as min_balance,
+    sum(b.max_balance) as max_balance,
     case when to_number(b.month) >=
       to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -3), 'yyyymm'))
     then 1 else 0 end as is_w3m,
     case when to_number(b.month) >=
       to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -1), 'yyyymm'))
     then 1 else 0 end as is_w1m
-  from t_temp_union_pool a
-  inner join balance_raw b on a.user_id = b.identifier
+  from (select distinct register_based_id, base_month from t_temp_union_pool) a
+  inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+  inner join balance_raw b on m.user_id = b.identifier
     and to_number(b.month) between
         to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -6), 'yyyymm'))
         and to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -1), 'yyyymm'))
+  group by a.register_based_id, a.base_month, b.month
 )
 
 select
-  user_id,
+  register_based_id,
   base_month,
 
   max(avg_balance)                                                         as max_balance_w_6m,
@@ -48,8 +50,8 @@ select
   avg(case when is_w1m = 1 then avg_balance end)                           as avg_balance_w_1m
 
 from balance_base
-group by user_id, base_month
-order by user_id;
+group by register_based_id, base_month
+order by register_based_id;
 
 --transaction
 create table t_user_score_transaction_temp as
@@ -181,31 +183,33 @@ transaction_monthly as (
 ),
 transaction_raw as (
     select
-        a.user_id,
+        a.register_based_id,
         a.base_month,
         b.transaction_month,
-        b.trans_count,
-        b.trans_amount,
-        b.trans_count_credit,
-        b.trans_amount_credit,
-        b.trans_amount_card,
-        b.night_count,
-        b.morning_count,
+        sum(b.trans_count) as trans_count,
+        sum(b.trans_amount) as trans_amount,
+        sum(b.trans_count_credit) as trans_count_credit,
+        sum(b.trans_amount_credit) as trans_amount_credit,
+        sum(b.trans_amount_card) as trans_amount_card,
+        sum(b.night_count) as night_count,
+        sum(b.morning_count) as morning_count,
         case when to_number(b.transaction_month) >=
             to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -3), 'yyyymm'))
         then 1 else 0 end as is_w3m,
         case when to_number(b.transaction_month) >=
             to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -1), 'yyyymm'))
         then 1 else 0 end as is_w1m
-    from t_temp_union_pool a
-    inner join transaction_monthly b on a.user_id = b.userid
+    from (select distinct register_based_id, base_month from t_temp_union_pool) a
+    inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+    inner join transaction_monthly b on m.user_id = b.userid
         and to_number(b.transaction_month) between
             to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -6), 'yyyymm'))
             and to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -1), 'yyyymm'))
+    group by a.register_based_id, a.base_month, b.transaction_month
 )
 
 select
-    user_id,
+    register_based_id,
     base_month,
 
     max(trans_count)                                                             as max_trans_cnt_w_6m,
@@ -226,51 +230,23 @@ select
     count(distinct transaction_month)                                            as distinct_transaction_months_w_6m
 
 from transaction_raw
-group by user_id, base_month
-order by user_id;
+group by register_based_id, base_month
+order by register_based_id;
 
 --tenure
 create table t_user_score_tenure_temp as 
-select distinct
-  a.user_id,
+select
+  a.register_based_id,
   a.base_month,
-  case when trunc(to_date(to_char(a.base_month), 'yyyymm')) - trunc(b.contract_date) >= 0 then trunc(to_date(to_char(a.base_month), 'yyyymm')) - trunc(b.contract_date) - 1
+  case when trunc(to_date(to_char(a.base_month), 'yyyymm')) - trunc(min(b.contract_date)) >= 0 then trunc(to_date(to_char(a.base_month), 'yyyymm')) - trunc(min(b.contract_date)) - 1
   else null end as sign_tenure,
-  case when trunc(to_date(to_char(a.base_month), 'yyyymm')) - trunc(c.created_on) >= 0 then trunc(to_date(to_char(a.base_month), 'yyyymm')) - trunc(c.created_on)
+  case when trunc(to_date(to_char(a.base_month), 'yyyymm')) - trunc(min(c.created_on)) >= 0 then trunc(to_date(to_char(a.base_month), 'yyyymm')) - trunc(min(c.created_on))
   else null end as toki_tenure
-from t_temp_union_pool a
-left join (
-    SELECT
-    id_,
-    CASE
-        WHEN REGEXP_LIKE(ts, '^[0-9]{13}$')
-        THEN DATE '1970-01-01' + TO_NUMBER(ts) / 1000 / 86400
-        ELSE NULL
-    END AS contract_date
-    FROM (
-    SELECT
-        id_,
-        COALESCE(
-            REGEXP_SUBSTR(
-                imsaccount,
-                'signedAt[^0-9]*([0-9]{13})',
-                1, 1, NULL, 1
-            ),
-            REGEXP_SUBSTR(
-                imsaccount,
-                'FILE_([0-9]{13})',
-                1, 1, NULL, 1
-            ),
-            REGEXP_SUBSTR(
-                imsaccount,
-                'IDENTIFIER_([0-9]{13})',
-                1, 1, NULL, 1
-            )
-        ) AS ts
-    FROM toki.mongo_users
-)
-) b on a.user_id = b.id_
-left join toki.dpr_maat_customers c on a.user_id = c.identifier;
+from (select distinct register_based_id, base_month from t_temp_union_pool) a
+inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+left join T_MONGO_CONTRACT b on m.user_id = b.id_
+left join toki.dpr_maat_customers c on m.user_id = c.identifier
+group by a.register_based_id, a.base_month;
 
 --service
 CREATE TABLE t_user_score_service_more_temp AS
@@ -529,7 +505,7 @@ toki_transaction AS (
 
 service_raw AS (
     SELECT DISTINCT
-        d.user_id,
+        d.register_based_id,
         d.base_month,
         TO_NUMBER(TO_CHAR(TO_DATE(a.transaction_date, 'yyyy-mm-dd'), 'yyyymm')) AS transaction_month,
         b.service_name AS merchant_name,
@@ -543,14 +519,15 @@ service_raw AS (
     FROM toki_transaction a
     INNER JOIN t_merchant_lookup b ON b.merchant_id = a.target_id
     LEFT JOIN toki_data_proc_user.lookup_merchant_category c ON LOWER(b.merchant_group) = c.merchant_group
-    INNER JOIN t_temp_union_pool d ON a.userid = d.user_id
+    INNER JOIN t_temp_user_map m ON a.userid = m.user_id
+    INNER JOIN (select distinct register_based_id, base_month from t_temp_union_pool) d ON m.register_based_id = d.register_based_id
         AND TO_NUMBER(TO_CHAR(TO_DATE(a.transaction_date, 'yyyy-mm-dd'), 'yyyymm')) BETWEEN
             TO_NUMBER(TO_CHAR(ADD_MONTHS(TO_DATE(d.base_month, 'yyyymm'), -6), 'yyyymm'))
             AND TO_NUMBER(TO_CHAR(ADD_MONTHS(TO_DATE(d.base_month, 'yyyymm'), -1), 'yyyymm'))
 )
 
-SELECT 
-    user_id,
+SELECT
+    register_based_id,
     base_month,
     COUNT(DISTINCT CASE WHEN is_w1m = 1 THEN merchant_group END) AS merchant_group_count_w_1m,
     COUNT(DISTINCT CASE WHEN is_w3m = 1 AND merchant_name IN ('Unitel Payment', 'Gmobile Payment', 'Skytel Payment', 'Univision Payment')
@@ -559,7 +536,7 @@ SELECT
         THEN transaction_month || '|' || merchant_name END)                                            AS transport_count_sum_w6m
 
 FROM service_raw
-GROUP BY user_id, base_month;
+GROUP BY register_based_id, base_month;
 
 --parking
 create table t_user_score_parking_temp as
@@ -578,7 +555,7 @@ with parking_raw as (
 ),
 parking_base as (
   select
-    b.user_id,
+    a.register_based_id,
     a.base_month,
     b.plate_number,
     b.transactionid,
@@ -592,28 +569,30 @@ parking_base as (
     case when trunc(b.created_date / 100) >=
       to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -1), 'yyyymm'))
     then 1 else 0 end as is_w1m
-  from t_temp_union_pool a
-  inner join parking_raw b on a.user_id = b.user_id
+  from (select distinct register_based_id, base_month from t_temp_union_pool) a
+  inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+  inner join parking_raw b on m.user_id = b.user_id
     and trunc(b.created_date / 100) between
         to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -6), 'yyyymm'))
         and to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -1), 'yyyymm'))
 )
 
 select
-  user_id,
+  register_based_id,
   base_month,
 
   sum(amount)                                                                        as sum_parking_amt_w_6m
 
 from parking_base
-group by user_id, base_month
-order by user_id;
+group by register_based_id, base_month
+order by register_based_id;
 
 --number value
 create table t_user_score_number_value_temp as 
 with number_change_log as (
     select
         b.identifier as user_id,
+        b.created_on as user_created_on,
         b.device_no as last_state,
         a.old_state,
         a.new_state,
@@ -633,16 +612,21 @@ joined as (
       when to_number(a.base_month) <= to_number(substr(b.change_date, 1, 6)) then b.last_state
       when to_number(a.base_month) >  to_number(substr(b.change_date, 1, 6)) then b.old_state
     end as device_no,
-    b.change_date as log_change_date
-  from t_temp_union_pool a
-  left join number_change_log b on a.user_id = b.user_id
+    b.change_date as log_change_date,
+    b.user_created_on
+  from (select distinct register_based_id, base_month from t_temp_union_pool) a
+  inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+  left join number_change_log b on m.user_id = b.user_id
 ),
 ranked as (
   select
     a.*,
     row_number() over (
-      partition by user_id, base_month
+      partition by register_based_id, base_month
       order by
+        case when user_created_on is not null
+              and to_number(to_char(user_created_on, 'yyyymm')) <= to_number(base_month) then 0 else 1 end asc,
+        user_created_on desc nulls last,
         case
           when to_number(base_month) > to_number(substr(log_change_date, 1, 6)) then 0
           when to_number(base_month) <= to_number(substr(log_change_date, 1, 6)) then 1
@@ -653,12 +637,12 @@ ranked as (
   from joined a
 ),
 number_base as (
-    select user_id, base_month, device_no
+    select register_based_id, base_month, device_no
     from ranked
     where rn = 1
 )
 select
-    user_id,
+    register_based_id,
     base_month,
     device_no,
 
@@ -742,27 +726,29 @@ mp_raw as (
 ),
 mp_base as (
     select
-        a.user_id,
+        a.register_based_id,
         a.base_month,
         b.createmon,
-        b.night_usage_count,
-        b.morning_usage_count,
-        b.afternoon_usage_count,
-        b.evening_usage_count,
+        sum(b.night_usage_count) as night_usage_count,
+        sum(b.morning_usage_count) as morning_usage_count,
+        sum(b.afternoon_usage_count) as afternoon_usage_count,
+        sum(b.evening_usage_count) as evening_usage_count,
         case when to_number(b.createmon) >=
             to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -3), 'yyyymm'))
         then 1 else 0 end as is_w3m,
         case when to_number(b.createmon) >=
             to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -1), 'yyyymm'))
         then 1 else 0 end as is_w1m
-    from t_temp_union_pool a
-    inner join mp_raw b on a.user_id = b.userid
+    from (select distinct register_based_id, base_month from t_temp_union_pool) a
+    inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+    inner join mp_raw b on m.user_id = b.userid
         and to_number(b.createmon) between
             to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -6), 'yyyymm'))
             and to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -1), 'yyyymm'))
+    group by a.register_based_id, a.base_month, b.createmon
 )
     select
-        user_id,
+        register_based_id,
         base_month,
 
         stddev(night_usage_count)                                               as night_usage_count_std_w_6m,
@@ -778,7 +764,7 @@ mp_base as (
 
 
     from mp_base
-    group by user_id, base_month;
+    group by register_based_id, base_month;
 
 --kyc
 create table t_user_score_kyc_temp as
@@ -794,14 +780,15 @@ with user_kyc_raw as (
     from toki.mongo_userkycs
 )
     select
-        a.user_id,
+        a.register_based_id,
         a.base_month,
         max(case when b.isvisibletoadmin = 'True' and b.adminaction = 'ADMIN_APPROVED'
                  and b.kyctype is not null then b.kyctype end)                              as last_kyctype_true
-    from t_temp_union_pool a
-    inner join user_kyc_raw b on a.user_id = b.userid
+    from (select distinct register_based_id, base_month from t_temp_union_pool) a
+    inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+    inner join user_kyc_raw b on m.user_id = b.userid
         and to_number(b.kyc_month) < to_number(to_char(a.base_month))
-    group by a.user_id, a.base_month;
+    group by a.register_based_id, a.base_month;
 
 --gaming
 create table t_user_score_gaming_temp as
@@ -875,7 +862,7 @@ gaming_raw as (
 ),
 gaming_base as (
   select
-    a.user_id,
+    a.register_based_id,
     a.base_month,
     b.month_id,
     b.txn_date,
@@ -887,22 +874,23 @@ gaming_base as (
     case when to_number(b.month_id) >=
       to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -1), 'yyyymm'))
     then 1 else 0 end as is_w1m
-  from t_temp_union_pool a
-  inner join gaming_raw b on a.user_id = b.userid
+  from (select distinct register_based_id, base_month from t_temp_union_pool) a
+  inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+  inner join gaming_raw b on m.user_id = b.userid
     and to_number(b.month_id) between
         to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -6), 'yyyymm'))
         and to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -1), 'yyyymm'))
 )
 
 select
-  user_id,
+  register_based_id,
   base_month,
 
   sum(total_purchase_amount)                                         as sum_gaming_amt_w_6m
 
 from gaming_base
-group by user_id, base_month
-order by user_id;
+group by register_based_id, base_month
+order by register_based_id;
 
 --fire
 create table t_user_score_fire_temp as
@@ -935,34 +923,36 @@ group by d.user_id, d.event_month
 ),
 fire_base as (
     select
-        a.user_id,
+        a.register_based_id,
         a.base_month,
         b.event_month,
-        b.mobile_div,
-        b.avg_session_cnt_d,
-        b.total_session_cnt,
+        max(b.mobile_div) as mobile_div,
+        avg(b.avg_session_cnt_d) as avg_session_cnt_d,
+        sum(b.total_session_cnt) as total_session_cnt,
         case when to_number(b.event_month) >=
             to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -3), 'yyyymm'))
         then 1 else 0 end as is_w3m,
         case when to_number(b.event_month) >=
             to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -1), 'yyyymm'))
         then 1 else 0 end as is_w1m
-    from t_temp_union_pool a
-    inner join fire_raw b on a.user_id = b.userid
+    from (select distinct register_based_id, base_month from t_temp_union_pool) a
+    inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+    inner join fire_raw b on m.user_id = b.userid
         and to_number(b.event_month) between
             to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -6), 'yyyymm'))
             and to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -1), 'yyyymm'))
+    group by a.register_based_id, a.base_month, b.event_month
 )
 
 select
-    user_id,
+    register_based_id,
     base_month,
 
     round(avg(mobile_div), 2)                                                   as avg_fire_model_cnt_w_6m
 
 from fire_base
-group by user_id, base_month
-order by user_id;
+group by register_based_id, base_month
+order by register_based_id;
 
 --car ownership
 create table t_user_score_car_ownership_temp as
@@ -1096,7 +1086,7 @@ car_raw as (
 ),
 car_base as (
   select
-    a.user_id,
+    a.register_based_id,
     a.base_month,
     b.plate_number,
     b.owner_tag,
@@ -1106,35 +1096,37 @@ car_base as (
       when sum(cr.amount) > 50000 then 'Y'
       else 'N'
     end as effective_owner_tag
-  from t_temp_union_pool a
+  from (select distinct register_based_id, base_month from t_temp_union_pool) a
+  inner join t_temp_user_map m on a.register_based_id = m.register_based_id
   inner join mobility_cars b
-    on a.user_id = b.user_id
+    on m.user_id = b.user_id
     and to_number(to_char(to_date(b.saved_createdat, 'yyyy-mm-dd'), 'yyyymm')) <= a.base_month
   left join car_raw cr
     on cr.user_id = b.user_id
     and cr.plate_number = b.plate_number
     and trunc(cr.txn_date / 100) <= a.base_month
-  group by a.user_id, a.base_month, b.plate_number, b.owner_tag
+  group by a.register_based_id, a.base_month, b.plate_number, b.owner_tag
 )
 
 select
-  user_id,
+  register_based_id,
   base_month,
   max(case when effective_owner_tag = 'Y' then 1 else 0 end)  as is_own_car
 
 from car_base
-group by user_id, base_month
-order by user_id;
+group by register_based_id, base_month
+order by register_based_id;
 
 create table t_user_score_all_request_temp as
 with request_raw as (
   select distinct
-    p.user_id,
+    p.register_based_id,
     p.base_month,
     trunc(r.decision_engine_is_successful_date) as request_date
   from toki.credit_zms_request r
   inner join toki.credit_credit c on r.borrower_id = c.borrower_id
-  inner join t_temp_union_pool p on c.user_id = p.user_id
+  inner join t_temp_user_map m on c.user_id = m.user_id
+  inner join (select distinct register_based_id, base_month from t_temp_union_pool) p on m.register_based_id = p.register_based_id
   where r.decision_engine_is_successful_date is not null
     and to_number(to_char(r.decision_engine_is_successful_date, 'yyyymm')) between
         to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -24), 'yyyymm'))
@@ -1143,11 +1135,12 @@ with request_raw as (
   union all
 
   select distinct
-    p.user_id,
+    p.register_based_id,
     p.base_month,
     trunc(r.decision_engine_successful_date) as request_date
   from toki.handset_tmp_limit_request r
-  inner join t_temp_union_pool p on r.user_id = p.user_id
+  inner join t_temp_user_map m on r.user_id = m.user_id
+  inner join (select distinct register_based_id, base_month from t_temp_union_pool) p on m.register_based_id = p.register_based_id
   where r.decision_engine_successful_date is not null
     and to_number(to_char(r.decision_engine_successful_date, 'yyyymm')) between
         to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -24), 'yyyymm'))
@@ -1156,12 +1149,13 @@ with request_raw as (
   union all
 
   select distinct
-    p.user_id,
+    p.register_based_id,
     p.base_month,
     trunc(r.decision_engine_success_date) as request_date
   from toki.bnpl_limit_request r
   inner join toki.bnpl_account b on r.bnpl_account_id = b.id_
-  inner join t_temp_union_pool p on b.user_id = p.user_id
+  inner join t_temp_user_map m on b.user_id = m.user_id
+  inner join (select distinct register_based_id, base_month from t_temp_union_pool) p on m.register_based_id = p.register_based_id
   where r.decision_engine_success_date is not null
     and to_number(to_char(r.decision_engine_success_date, 'yyyymm')) between
         to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -24), 'yyyymm'))
@@ -1169,19 +1163,19 @@ with request_raw as (
 )
 
 select
-  user_id,
+  register_based_id,
   base_month,
   count(*) as req_cnt_w_2y,
   count(case when request_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -12)
     then 1 end)                                                                  as req_cnt_w_1y
 from request_raw
-group by user_id, base_month
-order by user_id;
+group by register_based_id, base_month
+order by register_based_id;
 
 create table t_user_score_all_limit_usage_temp as
 with credit_monthly as (
   select
-    p.user_id,
+    p.register_based_id,
     p.base_month,
     c.credit_id,
     to_char(cch.created_date, 'yyyymm')                                                     as year_month,
@@ -1189,36 +1183,37 @@ with credit_monthly as (
     coalesce(max(cch.balance) keep (dense_rank last order by cch.created_date), 0)          as balance
   from toki.credit_credit_history cch
   inner join toki.credit_credit c on cch.credit_id = c.credit_id
-  inner join t_temp_union_pool p on c.user_id = p.user_id
+  inner join t_temp_user_map m on c.user_id = m.user_id
+  inner join (select distinct register_based_id, base_month from t_temp_union_pool) p on m.register_based_id = p.register_based_id
   where cch.created_date is not null
     and to_number(to_char(cch.created_date, 'yyyymm')) between
         to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -24), 'yyyymm'))
         and to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -1), 'yyyymm'))
-  group by p.user_id, p.base_month, c.credit_id, to_char(cch.created_date, 'yyyymm')
+  group by p.register_based_id, p.base_month, c.credit_id, to_char(cch.created_date, 'yyyymm')
 ),
 credit_latest_month as (
-  select user_id, base_month, credit_id, max(year_month) as latest_month
+  select register_based_id, base_month, credit_id, max(year_month) as latest_month
   from credit_monthly
-  group by user_id, base_month, credit_id
+  group by register_based_id, base_month, credit_id
 ),
 latest_credit as (
-  select user_id, base_month, credit_id,
+  select register_based_id, base_month, credit_id,
     row_number() over (
-      partition by user_id, base_month
+      partition by register_based_id, base_month
       order by latest_month desc, credit_id desc
     ) as rn
   from credit_latest_month
 ),
 credit_util as (
   select
-    ms.user_id,
+    ms.register_based_id,
     ms.base_month,
     ms.year_month,
     ms.balance,
     ms.credit_limit as total_limit
   from latest_credit lc
   inner join credit_monthly ms
-    on ms.user_id = lc.user_id and ms.base_month = lc.base_month and ms.credit_id = lc.credit_id
+    on ms.register_based_id = lc.register_based_id and ms.base_month = lc.base_month and ms.credit_id = lc.credit_id
   where lc.rn = 1
 ),
 
@@ -1318,36 +1313,37 @@ bnpl_account_result as (
 ),
 bnpl_util as (
   select
-    a.user_id,
+    a.register_based_id,
     a.base_month,
     to_char(b.month, 'FM000000') as year_month,
     sum(b.latest_balance)        as balance,
     sum(b.latest_bnpl_limit)     as total_limit
-  from t_temp_union_pool a
-  inner join bnpl_account_result b on a.user_id = b.user_id
+  from (select distinct register_based_id, base_month from t_temp_union_pool) a
+  inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+  inner join bnpl_account_result b on m.user_id = b.user_id
     and b.month between
         to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -24), 'yyyymm'))
         and to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -1), 'yyyymm'))
-  group by a.user_id, a.base_month, b.month
+  group by a.register_based_id, a.base_month, b.month
 ),
 
 all_raw as (
-  select user_id, base_month, year_month, balance, total_limit from credit_util
+  select register_based_id, base_month, year_month, balance, total_limit from credit_util
   union all
-  select user_id, base_month, year_month, balance, total_limit from bnpl_util
+  select register_based_id, base_month, year_month, balance, total_limit from bnpl_util
 ),
 monthly_combined as (
   select
-    user_id,
+    register_based_id,
     base_month,
     year_month,
     case when sum(total_limit) > 0 then sum(balance) / sum(total_limit) else 0 end as util_ratio
   from all_raw
-  group by user_id, base_month, year_month
+  group by register_based_id, base_month, year_month
 )
 
 select
-  user_id,
+  register_based_id,
   base_month,
 
   round(max(util_ratio), 2)                                                        as max_util_pct_w_2y,
@@ -1363,13 +1359,15 @@ select
   round(max(util_ratio) keep (dense_rank last order by year_month), 2)             as latest_util_pct
 
 from monthly_combined
-group by user_id, base_month
-order by user_id;
+group by register_based_id, base_month
+order by register_based_id;
 
 create table t_user_score_bnpl_repayment_temp as 
 with user_pool as (
-    select distinct user_id, base_month from t_temp_union_pool
-    where user_id is not null
+    select distinct m.user_id, a.register_based_id, a.base_month
+    from (select distinct register_based_id, base_month from t_temp_union_pool) a
+    inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+    where m.user_id is not null
 ),
 invoice_raw as (
   select distinct
@@ -1417,7 +1415,7 @@ repayment_aggregation as (
 ),
 calculated_od as (
   select
-    i.user_id,
+    m.register_based_id,
     i.loan_request_id,
     i.invoice_id,
     i.loan_type,
@@ -1468,7 +1466,7 @@ calculated_od as (
 )
 
 select distinct
-  user_id,
+  register_based_id,
   base_month,
 
   sum(case when od > 0 and repayment_type = 'REPAYMENT' then invoice_amt else 0 end) as od_inv_amt_w_2y,
@@ -1489,12 +1487,12 @@ select distinct
   max(case when to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then od end) as max_od_w_6m
 
 from calculated_od
-group by user_id, base_month;
+group by register_based_id, base_month;
 
 create table t_user_score_credit_repayment_temp as 
 with tmp_credit_invoice as (
   select
-    b.user_id,
+    b.register_based_id,
     b.base_month,
     i.invoice_id,
     i.invoice_type,
@@ -1518,10 +1516,8 @@ with tmp_credit_invoice as (
     end as od
   from toki.credit_invoice i
   inner join toki.credit_credit cc on i.credit_id = cc.credit_id   
-  inner join (
-    select * from t_temp_union_pool
-    where user_id is not null
-    ) b on cc.user_id = b.user_id
+  inner join t_temp_user_map m on cc.user_id = m.user_id
+  inner join (select distinct register_based_id, base_month from t_temp_union_pool) b on m.register_based_id = b.register_based_id
     and trunc(i.due_date, 'MM') between add_months(to_date(to_char(b.base_month), 'yyyymm'), -24)
       and add_months(to_date(to_char(b.base_month), 'yyyymm'), -1)
       and i.principal_amt > 0
@@ -1529,7 +1525,7 @@ with tmp_credit_invoice as (
 )
 
 select distinct
-  user_id,
+  register_based_id,
   base_month,
 
   sum(case when od > 0 and invoice_type = 'MONTHLY' then invoice_amt else 0 end) as od_inv_amt_w_2y,
@@ -1551,7 +1547,7 @@ select distinct
   max(case when trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -6) then od end) as max_od_w_6m
 
 from tmp_credit_invoice
-group by user_id, base_month;
+group by register_based_id, base_month;
 
 create table t_user_score_lease_repayment_temp as
 with tmp_handset_invoice as (
@@ -1581,7 +1577,7 @@ tmp_handset_repayment as (
 ),
 handset_combined as (
     select distinct
-        d.user_id,
+        d.register_based_id,
         d.base_month,
         a.loan_id,
         to_number(to_char(trunc(c.loan_activated_date), 'yyyymmdd')) as loan_activated_date,
@@ -1606,10 +1602,8 @@ handset_combined as (
     left join tmp_handset_repayment rep on a.loan_id = rep.loan_id and a.loan_invoice_id = rep.loan_invoice_id
     inner join toki.handset_orders b on to_number(a.loan_id) = b.loanid  --sync n zogsson tul orluulah shaardlagtai
     inner join toki.handset_loan c on a.loan_id = c.id
-    inner join (
-        select * from t_temp_union_pool 
-        where user_id is not null
-        ) d on b.accountid = d.user_id
+    inner join t_temp_user_map m on b.accountid = m.user_id
+    inner join (select distinct register_based_id, base_month from t_temp_union_pool) d on m.register_based_id = d.register_based_id
         and trunc(a.due_date, 'MM') between add_months(to_date(to_char(d.base_month), 'yyyymm'), -24)
         and add_months(to_date(to_char(d.base_month), 'yyyymm'), -1)
     --where a.invoice_type = 'SCHEDULED' 
@@ -1618,7 +1612,7 @@ handset_combined as (
 )
 
 select distinct
-  user_id,
+  register_based_id,
   base_month,
 
 
@@ -1642,12 +1636,12 @@ select distinct
   max(case when to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then od end) as max_od_w_6m
 
 from handset_combined
-group by user_id, base_month;
+group by register_based_id, base_month;
 
 create table t_user_score_credit_usage_temp as 
 with base_data as (
   select
-    t.user_id,
+    t.register_based_id,
     t.base_month,
     lr.merchant_name,
     lr.product_name,
@@ -1657,24 +1651,25 @@ with base_data as (
 
   from toki.credit_loan_request lr
   inner join toki.credit_credit cc on lr.credit_id = cc.credit_id
-  inner join t_temp_union_pool t on cc.user_id = t.user_id
+  inner join t_temp_user_map m on cc.user_id = m.user_id
+  inner join (select distinct register_based_id, base_month from t_temp_union_pool) t on m.register_based_id = t.register_based_id
   and trunc(lr.created_date, 'MM') between add_months(to_date(to_char(t.base_month), 'yyyymm'), -24)
   and add_months(to_date(to_char(t.base_month), 'yyyymm'), -1)
   and lr.loan_type = 'PURCHASE' and lr.request_status = 'SUCCESS'
 ),
 daily_usage as (
   select
-    user_id,
+    register_based_id,
     base_month,
     usage_date,
-    usage_date - row_number() over (partition by user_id, base_month order by usage_date) as island_id
+    usage_date - row_number() over (partition by register_based_id, base_month order by usage_date) as island_id
   from (
-    select distinct user_id, base_month, usage_date
+    select distinct register_based_id, base_month, usage_date
     from base_data
   )
 )
   select
-    user_id,
+    register_based_id,
     base_month,
 
     count(*)                                                                                 as credit_usage_cnt_w_2y,
@@ -1684,7 +1679,7 @@ daily_usage as (
     to_date(to_char(base_month), 'yyyymm') - max(trunc(created_date))                                                                 as days_since_last_credit_usage
 
   from base_data
-  group by user_id, base_month;
+  group by register_based_id, base_month;
 
 create table t_user_score_lease_usage_temp as
 with raw_data as (
@@ -1714,7 +1709,7 @@ from (
 ),
 base_data as (
   select
-    r.userid,
+    t.register_based_id,
     t.base_month,
     r.model_name,
     r.product_type,
@@ -1737,24 +1732,25 @@ base_data as (
     end as model_group
 
   from raw_data r
-  inner join t_temp_union_pool t on r.userid = t.user_id
+  inner join t_temp_user_map m on r.userid = m.user_id
+  inner join (select distinct register_based_id, base_month from t_temp_union_pool) t on m.register_based_id = t.register_based_id
   and trunc(to_date(to_char(r.createdat), 'yyyymmdd'), 'MM') between add_months(to_date(to_char(t.base_month), 'yyyymm'), -24)
   and add_months(to_date(to_char(t.base_month), 'yyyymm'), -1)
 ),
 
 daily_usage as (
   select
-    userid,
+    register_based_id,
     base_month,
     usage_date,
-    usage_date - row_number() over (partition by userid, base_month order by usage_date) as island_id
+    usage_date - row_number() over (partition by register_based_id, base_month order by usage_date) as island_id
   from (
-    select distinct userid, base_month, usage_date
+    select distinct register_based_id, base_month, usage_date
     from base_data
   )
 )
   select
-    userid,
+    register_based_id,
     base_month,
 
     count(*)                                                                                 as lease_usage_cnt_w_2y,
@@ -1765,19 +1761,19 @@ daily_usage as (
     to_date(to_char(base_month), 'yyyymm') - max(usage_date)                                                                    as days_since_last_lease_usage
 
   from base_data
-  group by userid, base_month;
+  group by register_based_id, base_month;
 
 create table t_user_score_age_temp as
 select
-  user_id,
+  register_based_id,
   base_month,
   floor(months_between(
     to_date(to_char(base_month, 'FM000000'), 'YYYYMM'),
-    parsed_dob
+    min(parsed_dob)
   ) / 12) as age
 from (
   select
-    a.user_id,
+    a.register_based_id,
     a.base_month,
     case
       when b.dob like '____-__-__'
@@ -1789,15 +1785,17 @@ from (
         and to_number(substr(b.dob, 1, 2)) between 1 and 31
         then to_date(b.dob, 'DD/MM/YYYY')
     end as parsed_dob
-  from t_temp_union_pool a
-  inner join toki.dpr_maat_customers b on a.user_id = b.identifier
+  from (select distinct register_based_id, base_month from t_temp_union_pool) a
+  inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+  inner join toki.dpr_maat_customers b on m.user_id = b.identifier
   where b.dob is not null
-);
+)
+group by register_based_id, base_month;
 
 create table t_user_score_bnpl_usage_temp as
 with merchant_raw as (
   select
-    a.account_id,
+    t.register_based_id,
     trunc(b.transaction_date) as usage_date,
     a.transaction_id,
     a.amount,
@@ -1806,13 +1804,14 @@ with merchant_raw as (
   from toki.dpr_tajet_bnpl_request a
   left join toki.dpr_tajet_teller_transactions b on b.identifier = a.transaction_id
   left join t_merchant_lookup c on c.merchant_id = b.target_account_identifier
-  inner join t_temp_union_pool t on a.account_id = t.user_id
+  inner join t_temp_user_map m on a.account_id = m.user_id
+  inner join (select distinct register_based_id, base_month from t_temp_union_pool) t on m.register_based_id = t.register_based_id
     and trunc(b.transaction_date, 'MM') between add_months(to_date(to_char(t.base_month), 'yyyymm'), -24)
     and add_months(to_date(to_char(t.base_month), 'yyyymm'), -1)
   where status <> 'CANCELED'
 )
   select
-    account_id,
+    register_based_id,
     base_month,
 
     count(*)                                                                                 as bnpl_usage_cnt_w_2y,
@@ -1823,10 +1822,11 @@ with merchant_raw as (
     to_date(to_char(base_month), 'yyyymm') - max(usage_date)                                                                          as days_since_last_bnpl_usage
 
   from merchant_raw
-  group by account_id, base_month;
+  group by register_based_id, base_month;
 
 create table t_user_score_feature_set_temp as
 select
+  t.register_based_id,
   t.user_id,
   t.mob_group,
   t.base_month,
@@ -1980,26 +1980,26 @@ select
 
 from t_temp_union_pool t
 
-left join t_user_score_age_temp                  ag  on t.user_id = ag.user_id  and t.base_month = ag.base_month
-left join t_user_score_gaming_temp            g   on t.user_id = g.user_id   and t.base_month = g.base_month
-left join t_user_score_parking_temp           pk  on t.user_id = pk.user_id  and t.base_month = pk.base_month
-left join t_user_score_service_more_temp      sm  on t.user_id = sm.user_id  and t.base_month = sm.base_month
-left join t_user_score_car_ownership_temp     co  on t.user_id = co.user_id  and t.base_month = co.base_month
-left join t_user_score_transaction_temp       txn on t.user_id = txn.user_id and t.base_month = txn.base_month
-left join t_user_score_wallet_temp            wlt on t.user_id = wlt.user_id and t.base_month = wlt.base_month
-left join t_user_score_fire_temp              fr  on t.user_id = fr.user_id  and t.base_month = fr.base_month
-left join t_user_score_kyc_temp               kyc on t.user_id = kyc.user_id and t.base_month = kyc.base_month
-left join t_user_score_mp_usage_temp          mp  on t.user_id = mp.user_id  and t.base_month = mp.base_month
-left join t_user_score_number_value_temp      nv  on t.user_id = nv.user_id  and t.base_month = nv.base_month
-left join t_user_score_tenure_temp            te  on t.user_id = te.user_id  and t.base_month = te.base_month
-left join t_user_score_all_limit_usage_temp   alu on t.user_id = alu.user_id and t.base_month = alu.base_month
-left join t_user_score_all_request_temp       ar  on t.user_id = ar.user_id  and t.base_month = ar.base_month
-left join t_user_score_bnpl_repayment_temp    br  on t.user_id = br.user_id  and t.base_month = br.base_month
-left join t_user_score_bnpl_usage_temp        bu  on t.user_id = bu.account_id  and t.base_month = bu.base_month
-left join t_user_score_credit_repayment_temp  cr  on t.user_id = cr.user_id  and t.base_month = cr.base_month
-left join t_user_score_credit_usage_temp      cu  on t.user_id = cu.user_id  and t.base_month = cu.base_month
-left join t_user_score_lease_repayment_temp   lr  on t.user_id = lr.user_id  and t.base_month = lr.base_month
-left join t_user_score_lease_usage_temp       lu  on t.user_id = lu.userid   and t.base_month = lu.base_month;
+left join t_user_score_age_temp               ag  on t.register_based_id = ag.register_based_id  and t.base_month = ag.base_month
+left join t_user_score_gaming_temp            g   on t.register_based_id = g.register_based_id   and t.base_month = g.base_month
+left join t_user_score_parking_temp           pk  on t.register_based_id = pk.register_based_id  and t.base_month = pk.base_month
+left join t_user_score_service_more_temp      sm  on t.register_based_id = sm.register_based_id  and t.base_month = sm.base_month
+left join t_user_score_car_ownership_temp     co  on t.register_based_id = co.register_based_id  and t.base_month = co.base_month
+left join t_user_score_transaction_temp       txn on t.register_based_id = txn.register_based_id and t.base_month = txn.base_month
+left join t_user_score_wallet_temp            wlt on t.register_based_id = wlt.register_based_id and t.base_month = wlt.base_month
+left join t_user_score_fire_temp              fr  on t.register_based_id = fr.register_based_id  and t.base_month = fr.base_month
+left join t_user_score_kyc_temp               kyc on t.register_based_id = kyc.register_based_id and t.base_month = kyc.base_month
+left join t_user_score_mp_usage_temp          mp  on t.register_based_id = mp.register_based_id  and t.base_month = mp.base_month
+left join t_user_score_number_value_temp      nv  on t.register_based_id = nv.register_based_id  and t.base_month = nv.base_month
+left join t_user_score_tenure_temp            te  on t.register_based_id = te.register_based_id  and t.base_month = te.base_month
+left join t_user_score_all_limit_usage_temp   alu on t.register_based_id = alu.register_based_id and t.base_month = alu.base_month
+left join t_user_score_all_request_temp       ar  on t.register_based_id = ar.register_based_id  and t.base_month = ar.base_month
+left join t_user_score_bnpl_repayment_temp    br  on t.register_based_id = br.register_based_id  and t.base_month = br.base_month
+left join t_user_score_bnpl_usage_temp        bu  on t.register_based_id = bu.register_based_id  and t.base_month = bu.base_month
+left join t_user_score_credit_repayment_temp  cr  on t.register_based_id = cr.register_based_id  and t.base_month = cr.base_month
+left join t_user_score_credit_usage_temp      cu  on t.register_based_id = cu.register_based_id  and t.base_month = cu.base_month
+left join t_user_score_lease_repayment_temp   lr  on t.register_based_id = lr.register_based_id  and t.base_month = lr.base_month
+left join t_user_score_lease_usage_temp       lu  on t.register_based_id = lu.register_based_id  and t.base_month = lu.base_month;
 
 drop table t_user_score_wallet_temp;
 drop table t_user_score_transaction_temp;
