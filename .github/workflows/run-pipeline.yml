@@ -27,4 +27,4 @@ jobs:
             -e ORACLE_PORT \
             -e ORACLE_SERVICE \
             -e LOG_LEVEL \
-            user-score-prod:v1.0.0
+            user-score-prod:latest

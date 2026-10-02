@@ -16,4 +16,6 @@ jobs:
 
       - name: Docker build image
         run: |
-          docker build -t ${{github.event.repository.name}}:${{github.ref_name}} .
+          docker build \
+            -t ${{github.event.repository.name}}:${{github.ref_name}} \
+            -t ${{github.event.repository.name}}:latest .
