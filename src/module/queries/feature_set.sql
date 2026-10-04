@@ -896,7 +896,7 @@ create table t_user_score_gaming_temp as
 select 
     a.register_based_id,
     a.base_month,
-    null as sum_gaming_amt_w_6m
+    cast(null as number) as sum_gaming_amt_w_6m
 from t_temp_union_pool a; 
 
 --fire
