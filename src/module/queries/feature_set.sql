@@ -892,74 +892,74 @@
 -- group by register_based_id, base_month
 -- order by register_based_id;
 
-create table t_user_score_gaming_temp1 as
-select 
-    a.register_based_id,
-    a.base_month,
-    cast(null as number) as sum_gaming_amt_w_6m
-from t_temp_union_pool a; 
+-- create table t_user_score_gaming_temp1 as
+-- select 
+--     a.register_based_id,
+--     a.base_month,
+--     cast(null as number) as sum_gaming_amt_w_6m
+-- from t_temp_union_pool a; 
 
---fire
-create table t_user_score_fire_temp as
-with daily_data as (
-  select 
-    user_id,
-    to_date(event_day, 'yyyymmdd') as event_date,
-    to_number(substr(event_day, 1, 6)) as event_month,
-    city, country, device_brand_name, mobile_model_name, device_version, app_version,
-    session_cnt, session_sec, open_mp_cnt, qr_scan_cnt, read_noti_cnt, wallet_merchant_cnt,
-    qr_button_cnt, app_update_cnt, app_remove_cnt,
-    case when open_mp_cnt > 0 then 1 else 0 end as has_mp_activity,
-    case when (qr_scan_cnt + read_noti_cnt + wallet_merchant_cnt) > 0 then 1 else 0 end as has_high_activity
-  from toki.fire_analytics_user_daily 
-  where user_id is not null
-  and event_day between to_number(to_char(add_months(trunc(sysdate) - 1, -6), 'yyyymmdd')) and to_number(to_char(trunc(sysdate) - 1, 'yyyymmdd'))
-),
-fire_raw as (
-  select distinct
-    d.user_id as userid,
-    d.event_month,
+-- --fire
+-- create table t_user_score_fire_temp as
+-- with daily_data as (
+--   select 
+--     user_id,
+--     to_date(event_day, 'yyyymmdd') as event_date,
+--     to_number(substr(event_day, 1, 6)) as event_month,
+--     city, country, device_brand_name, mobile_model_name, device_version, app_version,
+--     session_cnt, session_sec, open_mp_cnt, qr_scan_cnt, read_noti_cnt, wallet_merchant_cnt,
+--     qr_button_cnt, app_update_cnt, app_remove_cnt,
+--     case when open_mp_cnt > 0 then 1 else 0 end as has_mp_activity,
+--     case when (qr_scan_cnt + read_noti_cnt + wallet_merchant_cnt) > 0 then 1 else 0 end as has_high_activity
+--   from toki.fire_analytics_user_daily 
+--   where user_id is not null
+--   and event_day between to_number(to_char(add_months(trunc(sysdate) - 1, -6), 'yyyymmdd')) and to_number(to_char(trunc(sysdate) - 1, 'yyyymmdd'))
+-- ),
+-- fire_raw as (
+--   select distinct
+--     d.user_id as userid,
+--     d.event_month,
     
-    count(distinct d.mobile_model_name) as mobile_div,
+--     count(distinct d.mobile_model_name) as mobile_div,
 
-    avg(d.session_cnt) as avg_session_cnt_d,
-    sum(d.session_cnt) as total_session_cnt
+--     avg(d.session_cnt) as avg_session_cnt_d,
+--     sum(d.session_cnt) as total_session_cnt
 
-from daily_data d
-group by d.user_id, d.event_month
-),
-fire_base as (
-    select
-        a.register_based_id,
-        a.base_month,
-        b.event_month,
-        max(b.mobile_div) as mobile_div,
-        avg(b.avg_session_cnt_d) as avg_session_cnt_d,
-        sum(b.total_session_cnt) as total_session_cnt,
-        case when to_number(b.event_month) >=
-            to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -3), 'yyyymm'))
-        then 1 else 0 end as is_w3m,
-        case when to_number(b.event_month) >=
-            to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -1), 'yyyymm'))
-        then 1 else 0 end as is_w1m
-    from (select distinct register_based_id, base_month from t_temp_union_pool) a
-    inner join t_temp_user_map m on a.register_based_id = m.register_based_id
-    inner join fire_raw b on m.user_id = b.userid
-        and to_number(b.event_month) between
-            to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -6), 'yyyymm'))
-            and to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -1), 'yyyymm'))
-    group by a.register_based_id, a.base_month, b.event_month
-)
+-- from daily_data d
+-- group by d.user_id, d.event_month
+-- ),
+-- fire_base as (
+--     select
+--         a.register_based_id,
+--         a.base_month,
+--         b.event_month,
+--         max(b.mobile_div) as mobile_div,
+--         avg(b.avg_session_cnt_d) as avg_session_cnt_d,
+--         sum(b.total_session_cnt) as total_session_cnt,
+--         case when to_number(b.event_month) >=
+--             to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -3), 'yyyymm'))
+--         then 1 else 0 end as is_w3m,
+--         case when to_number(b.event_month) >=
+--             to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -1), 'yyyymm'))
+--         then 1 else 0 end as is_w1m
+--     from (select distinct register_based_id, base_month from t_temp_union_pool) a
+--     inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+--     inner join fire_raw b on m.user_id = b.userid
+--         and to_number(b.event_month) between
+--             to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -6), 'yyyymm'))
+--             and to_number(to_char(add_months(to_date(a.base_month, 'yyyymm'), -1), 'yyyymm'))
+--     group by a.register_based_id, a.base_month, b.event_month
+-- )
 
-select
-    register_based_id,
-    base_month,
+-- select
+--     register_based_id,
+--     base_month,
 
-    round(avg(mobile_div), 2)                                                   as avg_fire_model_cnt_w_6m
+--     round(avg(mobile_div), 2)                                                   as avg_fire_model_cnt_w_6m
 
-from fire_base
-group by register_based_id, base_month
-order by register_based_id;
+-- from fire_base
+-- group by register_based_id, base_month
+-- order by register_based_id;
 
 --car ownership
 create table t_user_score_car_ownership_temp as
@@ -997,9 +997,40 @@ with saved_cars as (
   )
   group by user_id, plate_number, save_type, user_car, delflg, createdat, updatedat
 ),
+-- mobility_cars as (
+--   select
+--     case when lt.mongo_reg = lt.car_owner then 'Y' else 'N' end as owner_tag,
+--     lt.*
+--   from (
+--     select
+--       sc.user_id,
+--       sc.save_type,
+--       sc.user_car,
+--       sc.delflg,
+--       sc.createdat                                             as saved_createdat,
+--       lower(u.id_value)                                       as mongo_reg,
+--       lower(jt.ownerRegnum)                                    as car_owner,
+--       c.plate_number
+--     from toki.mobility_car_infos c
+--     left join json_table(
+--       replace(replace(replace(c.indata, '"', ''''), 'False', 'false'), 'None', 'null'),
+--       '$'
+--       columns (
+--         ownerRegnum  varchar2(50)  path '$.ownerRegnum',
+--         countryName  varchar2(100) path '$.countryName',
+--         manCount     number        path '$.manCount'
+--       )
+--     ) jt on 1 = 1
+--     left join saved_cars sc
+--       on c.plate_number = sc.plate_number
+--       and substr(c.createdat, 1, 10) = sc.createdat
+--     left join toki.dpr_maat_customers u
+--       on sc.user_id = u.identifier
+--   ) lt
+-- ),
 mobility_cars as (
   select
-    case when lt.mongo_reg = lt.car_owner then 'Y' else 'N' end as owner_tag,
+    case when lt.owner_user_id = lt.user_id then 'Y' else 'N' end as owner_tag,
     lt.*
   from (
     select
@@ -1008,50 +1039,15 @@ mobility_cars as (
       sc.user_car,
       sc.delflg,
       sc.createdat                                             as saved_createdat,
-      lower(json_value(u.wallet, '$[0].nationalId'))           as mongo_reg,
-      lower(jt.ownerRegnum)                                    as car_owner,
-      c.plate_number,
-      jt.countryName,
-      jt.manCount,
-      c.build_year,
-      c.cabin_number,
-      c.capacity,
-      c.certificate_number,
-      c.class_name,
-      c.color_name,
-      c.fuel_type,
-      c.length,
-      c.width,
-      c.height,
-      c.import_date,
-      c.mark_name,
-      c.model_name,
-      c.owner_country,
-      c.owner_handphone,
-      c.owner_type,
-      c.owner_workphone,
-      c.transmission,
-      c.wheel_position,
-      c.type,
-      c.indata,
-      c.delflg                                                 as car_delflg,
-      c.createdat,
-      c.updatedat
+      oc.identifier                                            as owner_user_id,
+      c.plate_number
     from toki.mobility_car_infos c
-    left join json_table(
-      replace(replace(replace(c.indata, '"', ''''), 'False', 'false'), 'None', 'null'),
-      '$'
-      columns (
-        ownerRegnum  varchar2(50)  path '$.ownerRegnum',
-        countryName  varchar2(100) path '$.countryName',
-        manCount     number        path '$.manCount'
-      )
-    ) jt on 1 = 1
     left join saved_cars sc
       on c.plate_number = sc.plate_number
       and substr(c.createdat, 1, 10) = sc.createdat
-    left join toki.mongo_users u
-      on sc.user_id = u.id_
+    left join toki.dpr_maat_customers oc
+      on lower(c.owner_regnum) = lower(oc.id_value)
+      and oc.identifier = sc.user_id
   ) lt
 ),
 penalty_raw as (
