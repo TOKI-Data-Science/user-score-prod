@@ -892,7 +892,7 @@
 -- group by register_based_id, base_month
 -- order by register_based_id;
 
-create table t_user_score_gaming_temp as
+create table t_user_score_gaming_temp1 as
 select 
     a.register_based_id,
     a.base_month,
@@ -1988,7 +1988,7 @@ select
 from t_temp_union_pool t
 
 left join t_user_score_age_temp               ag  on t.register_based_id = ag.register_based_id  and t.base_month = ag.base_month
-left join t_user_score_gaming_temp            g   on t.register_based_id = g.register_based_id   and t.base_month = g.base_month
+left join t_user_score_gaming_temp1            g   on t.register_based_id = g.register_based_id   and t.base_month = g.base_month
 left join t_user_score_parking_temp           pk  on t.register_based_id = pk.register_based_id  and t.base_month = pk.base_month
 left join t_user_score_service_more_temp      sm  on t.register_based_id = sm.register_based_id  and t.base_month = sm.base_month
 left join t_user_score_car_ownership_temp     co  on t.register_based_id = co.register_based_id  and t.base_month = co.base_month
