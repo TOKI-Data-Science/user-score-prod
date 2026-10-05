@@ -7,6 +7,7 @@ from src.module.run_report import RunReport
 
 SKIP_TARGET_POOL = True  # TEMPORARY, see main()
 SKIP_FEATURE_SET = True  # TEMPORARY, see main()
+SKIP_INACTIVE_TAG = True  # TEMPORARY, see main()
 
 
 @logging_timer(entry=True, exit=True)
@@ -23,8 +24,10 @@ def main():
         if not SKIP_FEATURE_SET:
             with report.track('build_feature_set'):
                 build_feature_set(report=report)
-        with report.track('build_inactive_tag'):
-           build_inactive_tag(report=report)
+        # TEMPORARY: t_user_score_inactive_tag already exists, so skip inactive_tag.sql.
+        if not SKIP_INACTIVE_TAG:
+            with report.track('build_inactive_tag'):
+                build_inactive_tag(report=report)
         with report.track('build_user_score'):
             build_user_score()
     finally:
