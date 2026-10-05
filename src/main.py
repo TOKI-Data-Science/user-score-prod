@@ -6,6 +6,7 @@ from src.module.user_score import build_user_score
 from src.module.run_report import RunReport
 
 SKIP_TARGET_POOL = True  # TEMPORARY, see main()
+SKIP_FEATURE_SET = True  # TEMPORARY, see main()
 
 
 @logging_timer(entry=True, exit=True)
@@ -18,8 +19,10 @@ def main():
         if not SKIP_TARGET_POOL:
             with report.track('build_target_pool'):
                 build_target_pool(report=report)
-        with report.track('build_feature_set'):
-            build_feature_set(report=report)
+        # TEMPORARY: t_user_score_feature_set_temp already exists, so skip feature_set.sql.
+        if not SKIP_FEATURE_SET:
+            with report.track('build_feature_set'):
+                build_feature_set(report=report)
         with report.track('build_inactive_tag'):
            build_inactive_tag(report=report)
         with report.track('build_user_score'):

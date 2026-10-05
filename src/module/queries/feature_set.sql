@@ -961,45 +961,76 @@
 -- group by register_based_id, base_month
 -- order by register_based_id;
 
---car ownership
-create table t_user_score_car_ownership_temp as
-with saved_cars as (
-  select
-    user_id,
-    plate_number,
-    save_type,
-    user_car,
-    delflg,
-    createdat,
-    updatedat
-  from (
-    select
-      user_id,
-      plate_number,
-      save_type,
-      user_car,
-      delflg,
-      substr(createdat, 1, 10) as createdat,
-      substr(updatedat, 1, 10) as updatedat
-    from toki.mobility_saved_cars
+-- --car ownership
+-- create table t_user_score_car_ownership_temp as
+-- with saved_cars as (
+--   select
+--     user_id,
+--     plate_number,
+--     save_type,
+--     user_car,
+--     delflg,
+--     createdat,
+--     updatedat
+--   from (
+--     select
+--       user_id,
+--       plate_number,
+--       save_type,
+--       user_car,
+--       delflg,
+--       substr(createdat, 1, 10) as createdat,
+--       substr(updatedat, 1, 10) as updatedat
+--     from toki.mobility_saved_cars
 
-    union all
+--     union all
 
-    select
-      user_id,
-      car_number || car_string as plate_number,
-      save_type,
-      car_save               as user_car,
-      delflg,
-      substr(createdat, 1, 10) as createdat,
-      substr(createdat, 1, 10) as updatedat
-    from toki.parking_cars_new
-  )
-  group by user_id, plate_number, save_type, user_car, delflg, createdat, updatedat
-),
+--     select
+--       user_id,
+--       car_number || car_string as plate_number,
+--       save_type,
+--       car_save               as user_car,
+--       delflg,
+--       substr(createdat, 1, 10) as createdat,
+--       substr(createdat, 1, 10) as updatedat
+--     from toki.parking_cars_new
+--   )
+--   group by user_id, plate_number, save_type, user_car, delflg, createdat, updatedat
+-- ),
+-- -- mobility_cars as (
+-- --   select
+-- --     case when lt.mongo_reg = lt.car_owner then 'Y' else 'N' end as owner_tag,
+-- --     lt.*
+-- --   from (
+-- --     select
+-- --       sc.user_id,
+-- --       sc.save_type,
+-- --       sc.user_car,
+-- --       sc.delflg,
+-- --       sc.createdat                                             as saved_createdat,
+-- --       lower(u.id_value)                                       as mongo_reg,
+-- --       lower(jt.ownerRegnum)                                    as car_owner,
+-- --       c.plate_number
+-- --     from toki.mobility_car_infos c
+-- --     left join json_table(
+-- --       replace(replace(replace(c.indata, '"', ''''), 'False', 'false'), 'None', 'null'),
+-- --       '$'
+-- --       columns (
+-- --         ownerRegnum  varchar2(50)  path '$.ownerRegnum',
+-- --         countryName  varchar2(100) path '$.countryName',
+-- --         manCount     number        path '$.manCount'
+-- --       )
+-- --     ) jt on 1 = 1
+-- --     left join saved_cars sc
+-- --       on c.plate_number = sc.plate_number
+-- --       and substr(c.createdat, 1, 10) = sc.createdat
+-- --     left join toki.dpr_maat_customers u
+-- --       on sc.user_id = u.identifier
+-- --   ) lt
+-- -- ),
 -- mobility_cars as (
 --   select
---     case when lt.mongo_reg = lt.car_owner then 'Y' else 'N' end as owner_tag,
+--     case when lt.owner_user_id = lt.user_id then 'Y' else 'N' end as owner_tag,
 --     lt.*
 --   from (
 --     select
@@ -1008,1019 +1039,988 @@ with saved_cars as (
 --       sc.user_car,
 --       sc.delflg,
 --       sc.createdat                                             as saved_createdat,
---       lower(u.id_value)                                       as mongo_reg,
---       lower(jt.ownerRegnum)                                    as car_owner,
+--       oc.identifier                                            as owner_user_id,
 --       c.plate_number
 --     from toki.mobility_car_infos c
---     left join json_table(
---       replace(replace(replace(c.indata, '"', ''''), 'False', 'false'), 'None', 'null'),
---       '$'
---       columns (
---         ownerRegnum  varchar2(50)  path '$.ownerRegnum',
---         countryName  varchar2(100) path '$.countryName',
---         manCount     number        path '$.manCount'
---       )
---     ) jt on 1 = 1
 --     left join saved_cars sc
 --       on c.plate_number = sc.plate_number
 --       and substr(c.createdat, 1, 10) = sc.createdat
---     left join toki.dpr_maat_customers u
---       on sc.user_id = u.identifier
+--     left join toki.dpr_maat_customers oc
+--       on lower(c.owner_regnum) = lower(oc.id_value)
+--       and oc.identifier = sc.user_id
 --   ) lt
 -- ),
-mobility_cars as (
-  select
-    case when lt.owner_user_id = lt.user_id then 'Y' else 'N' end as owner_tag,
-    lt.*
-  from (
-    select
-      sc.user_id,
-      sc.save_type,
-      sc.user_car,
-      sc.delflg,
-      sc.createdat                                             as saved_createdat,
-      oc.identifier                                            as owner_user_id,
-      c.plate_number
-    from toki.mobility_car_infos c
-    left join saved_cars sc
-      on c.plate_number = sc.plate_number
-      and substr(c.createdat, 1, 10) = sc.createdat
-    left join toki.dpr_maat_customers oc
-      on lower(c.owner_regnum) = lower(oc.id_value)
-      and oc.identifier = sc.user_id
-  ) lt
-),
-penalty_raw as (
-  select
-    t.user_id,
-    t.plate_number,
-    jt.amount,
-    to_number(to_char(to_date(substr(t.paid_date, 1, 10), 'yyyy-mm-dd'), 'yyyymmdd')) as txn_date
-  from (
-    select *
-    from toki.mobility_project_penaltys_invoices
-    where to_number(to_char(to_date(substr(createdat, 1, 10), 'yyyy-mm-dd'), 'yyyymmdd')) > 20240531
-  ) t
-  left join json_table(
-    replace(replace(replace(t.inv_data, '''', '"'), 'False', 'false'), 'None', 'null'),
-    '$[*]'
-    columns (
-      amount  number  path '$.amount'
-    )
-  ) jt on 1 = 1
-  where t.paid_date is not null
-    and jt.amount > 0
-),
-parking_raw as (
-  select
-    a.user_id,
-    a.plate_number,
-    to_number(a.amount) as amount,
-    to_number(to_char(to_date(substr(a.created_date, 1, 10), 'yyyy-mm-dd'), 'yyyymmdd')) as txn_date
-  from toki.mobility_project_parking_invoices a
-  inner join toki.mobility_project_parking_park_lists b
-    on a.parking_id = b.parking_id and b.status = 'working'
-  where a.pay = 'True'
-),
-car_raw as (
-  select user_id, plate_number, amount, txn_date from penalty_raw
-  union all
-  select user_id, plate_number, amount, txn_date from parking_raw
-),
-car_base as (
-  select
-    a.register_based_id,
-    a.base_month,
-    b.plate_number,
-    b.owner_tag,
-    sum(cr.amount) as plate_total_amt,
-    case
-      when b.owner_tag = 'Y' then 'Y'
-      when sum(cr.amount) > 50000 then 'Y'
-      else 'N'
-    end as effective_owner_tag
-  from (select distinct register_based_id, base_month from t_temp_union_pool) a
-  inner join t_temp_user_map m on a.register_based_id = m.register_based_id
-  inner join mobility_cars b
-    on m.user_id = b.user_id
-    and to_number(to_char(to_date(b.saved_createdat, 'yyyy-mm-dd'), 'yyyymm')) <= a.base_month
-  left join car_raw cr
-    on cr.user_id = b.user_id
-    and cr.plate_number = b.plate_number
-    and trunc(cr.txn_date / 100) <= a.base_month
-  group by a.register_based_id, a.base_month, b.plate_number, b.owner_tag
-)
-
-select
-  register_based_id,
-  base_month,
-  max(case when effective_owner_tag = 'Y' then 1 else 0 end)  as is_own_car
-
-from car_base
-group by register_based_id, base_month
-order by register_based_id;
-
-create table t_user_score_all_request_temp as
-with request_raw as (
-  select distinct
-    p.register_based_id,
-    p.base_month,
-    trunc(r.decision_engine_is_successful_date) as request_date
-  from toki.credit_zms_request r
-  inner join toki.credit_credit c on r.borrower_id = c.borrower_id
-  inner join t_temp_user_map m on c.user_id = m.user_id
-  inner join (select distinct register_based_id, base_month from t_temp_union_pool) p on m.register_based_id = p.register_based_id
-  where r.decision_engine_is_successful_date is not null
-    and to_number(to_char(r.decision_engine_is_successful_date, 'yyyymm')) between
-        to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -24), 'yyyymm'))
-        and to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -1), 'yyyymm'))
-
-  union all
-
-  select distinct
-    p.register_based_id,
-    p.base_month,
-    trunc(r.decision_engine_successful_date) as request_date
-  from toki.handset_tmp_limit_request r
-  inner join t_temp_user_map m on r.user_id = m.user_id
-  inner join (select distinct register_based_id, base_month from t_temp_union_pool) p on m.register_based_id = p.register_based_id
-  where r.decision_engine_successful_date is not null
-    and to_number(to_char(r.decision_engine_successful_date, 'yyyymm')) between
-        to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -24), 'yyyymm'))
-        and to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -1), 'yyyymm'))
-
-  union all
-
-  select distinct
-    p.register_based_id,
-    p.base_month,
-    trunc(r.decision_engine_success_date) as request_date
-  from toki.bnpl_limit_request r
-  inner join toki.bnpl_account b on r.bnpl_account_id = b.id_
-  inner join t_temp_user_map m on b.user_id = m.user_id
-  inner join (select distinct register_based_id, base_month from t_temp_union_pool) p on m.register_based_id = p.register_based_id
-  where r.decision_engine_success_date is not null
-    and to_number(to_char(r.decision_engine_success_date, 'yyyymm')) between
-        to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -24), 'yyyymm'))
-        and to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -1), 'yyyymm'))
-)
-
-select
-  register_based_id,
-  base_month,
-  count(*) as req_cnt_w_2y,
-  count(case when request_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -12)
-    then 1 end)                                                                  as req_cnt_w_1y
-from request_raw
-group by register_based_id, base_month
-order by register_based_id;
-
-create table t_user_score_all_limit_usage_temp as
-with credit_monthly as (
-  select
-    p.register_based_id,
-    p.base_month,
-    c.credit_id,
-    to_char(cch.created_date, 'yyyymm')                                                     as year_month,
-    max(cch.credit_limit) keep (dense_rank last order by cch.created_date)                  as credit_limit,
-    coalesce(max(cch.balance) keep (dense_rank last order by cch.created_date), 0)          as balance
-  from toki.credit_credit_history cch
-  inner join toki.credit_credit c on cch.credit_id = c.credit_id
-  inner join t_temp_user_map m on c.user_id = m.user_id
-  inner join (select distinct register_based_id, base_month from t_temp_union_pool) p on m.register_based_id = p.register_based_id
-  where cch.created_date is not null
-    and to_number(to_char(cch.created_date, 'yyyymm')) between
-        to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -24), 'yyyymm'))
-        and to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -1), 'yyyymm'))
-  group by p.register_based_id, p.base_month, c.credit_id, to_char(cch.created_date, 'yyyymm')
-),
-credit_latest_month as (
-  select register_based_id, base_month, credit_id, max(year_month) as latest_month
-  from credit_monthly
-  group by register_based_id, base_month, credit_id
-),
-latest_credit as (
-  select register_based_id, base_month, credit_id,
-    row_number() over (
-      partition by register_based_id, base_month
-      order by latest_month desc, credit_id desc
-    ) as rn
-  from credit_latest_month
-),
-credit_util as (
-  select
-    ms.register_based_id,
-    ms.base_month,
-    ms.year_month,
-    ms.balance,
-    ms.credit_limit as total_limit
-  from latest_credit lc
-  inner join credit_monthly ms
-    on ms.register_based_id = lc.register_based_id and ms.base_month = lc.base_month and ms.credit_id = lc.credit_id
-  where lc.rn = 1
-),
-
-bnpl_loan_data as (
-  select distinct
-    a.account_id                                                              as user_id,
-    a.transaction_id                                                          as loan_transaction_id,
-    a.amount                                                                  as loan_amt,
-    to_number(to_char(trunc(a.created_at), 'yyyymmdd'))                      as loan_date,
-    a.status                                                                  as loan_status,
-    to_number(to_char(trunc(c.transaction_date), 'yyyymmdd'))                as repayment_date
-  from toki.dpr_tajet_bnpl_request a
-  inner join toki.dpr_tajet_bnpl_invoice b
-    on a.transaction_id = b.transaction_id and a.status not in ('CANCELLED')
-  inner join toki.dpr_tajet_bnpl_repayment c
-    on b.id_ = c.invoice_id and c.status = 'SUCCESS' and c.payment_type = 'REPAYMENT'
-),
-bnpl_loan_summary as (
-  select distinct
-    user_id, loan_transaction_id, loan_date, loan_amt, loan_status,
-    max(repayment_date) as loan_closed_date
-  from bnpl_loan_data
-  group by user_id, loan_transaction_id, loan_date, loan_amt, loan_status
-),
-bnpl_account_summary as (
-  select distinct
-    a.bnpl_account_id,
-    a.user_id,
-    a.bnpl_limit,
-    to_number(to_char(trunc(a.created_date), 'yyyymmdd'))                    as created_date,
-    to_number(substr(to_char(to_number(to_char(trunc(a.created_date), 'yyyymmdd'))), 1, 6)) as month,
-    coalesce(sum(distinct case
-      when ls.loan_date <= to_number(to_char(trunc(a.created_date), 'yyyymmdd'))
-       and (ls.loan_closed_date is null
-            or ls.loan_closed_date > to_number(to_char(trunc(a.created_date), 'yyyymmdd')))
-      then ls.loan_amt else 0
-    end), 0) as balance
-  from toki.bnpl_account_history a
-  left join bnpl_loan_summary b
-    on a.user_id = b.user_id
-    and to_number(to_char(trunc(a.created_date), 'yyyymmdd')) = b.loan_date
-    and a.created_by_action = 'loan'
-  left join bnpl_loan_summary ls on a.user_id = ls.user_id
-  where a.product = 'DEFAULT'
-  group by a.bnpl_account_id, a.user_id, a.bnpl_limit, a.created_by_action,
-           to_number(to_char(trunc(a.created_date), 'yyyymmdd')),
-           b.loan_amt, b.loan_status, b.loan_closed_date
-),
-bnpl_monthly_values as (
-  select
-    bnpl_account_id, user_id, month, bnpl_limit as latest_bnpl_limit, balance as latest_balance,
-    row_number() over (partition by bnpl_account_id, user_id, month order by created_date desc) as rn
-  from bnpl_account_summary
-),
-bnpl_monthly_filtered as (
-  select bnpl_account_id, user_id, month, latest_bnpl_limit, latest_balance
-  from bnpl_monthly_values where rn = 1
-),
-bnpl_user_month_range as (
-  select bnpl_account_id, user_id, min(month) as min_month, max(month) as max_month
-  from bnpl_monthly_filtered
-  group by bnpl_account_id, user_id
-),
-bnpl_all_months as (
-  select
-    umr.bnpl_account_id,
-    umr.user_id,
-    to_number(to_char(add_months(to_date(to_char(umr.min_month), 'yyyymm'), level - 1), 'yyyymm')) as month
-  from bnpl_user_month_range umr
-  connect by level <= months_between(
-               to_date(to_char(umr.max_month), 'yyyymm'),
-               to_date(to_char(umr.min_month), 'yyyymm')) + 1
-    and prior bnpl_account_id = bnpl_account_id
-    and prior user_id         = user_id
-    and prior sys_guid()      is not null
-),
-bnpl_account_result as (
-  select
-    am.bnpl_account_id,
-    am.user_id,
-    am.month,
-    coalesce(mf.latest_bnpl_limit,
-      last_value(mf.latest_bnpl_limit ignore nulls) over (
-        partition by am.bnpl_account_id, am.user_id
-        order by am.month
-        rows between unbounded preceding and current row)) as latest_bnpl_limit,
-    coalesce(mf.latest_balance,
-      last_value(mf.latest_balance ignore nulls) over (
-        partition by am.bnpl_account_id, am.user_id
-        order by am.month
-        rows between unbounded preceding and current row)) as latest_balance
-  from bnpl_all_months am
-  left join bnpl_monthly_filtered mf
-    on am.bnpl_account_id = mf.bnpl_account_id
-    and am.user_id        = mf.user_id
-    and am.month          = mf.month
-),
-bnpl_util as (
-  select
-    a.register_based_id,
-    a.base_month,
-    to_char(b.month, 'FM000000') as year_month,
-    sum(b.latest_balance)        as balance,
-    sum(b.latest_bnpl_limit)     as total_limit
-  from (select distinct register_based_id, base_month from t_temp_union_pool) a
-  inner join t_temp_user_map m on a.register_based_id = m.register_based_id
-  inner join bnpl_account_result b on m.user_id = b.user_id
-    and b.month between
-        to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -24), 'yyyymm'))
-        and to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -1), 'yyyymm'))
-  group by a.register_based_id, a.base_month, b.month
-),
-
-all_raw as (
-  select register_based_id, base_month, year_month, balance, total_limit from credit_util
-  union all
-  select register_based_id, base_month, year_month, balance, total_limit from bnpl_util
-),
-monthly_combined as (
-  select
-    register_based_id,
-    base_month,
-    year_month,
-    case when sum(total_limit) > 0 then sum(balance) / sum(total_limit) else 0 end as util_ratio
-  from all_raw
-  group by register_based_id, base_month, year_month
-)
-
-select
-  register_based_id,
-  base_month,
-
-  round(max(util_ratio), 2)                                                        as max_util_pct_w_2y,
-
-  round(min(case when to_number(year_month) >=
-    to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm'))
-    then util_ratio end), 2)                                                       as min_util_pct_w_6m,
-
-  round(max(case when to_number(year_month) >=
-    to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -3), 'yyyymm'))
-    then util_ratio end), 2)                                                       as max_util_pct_w_3m,
-
-  round(max(util_ratio) keep (dense_rank last order by year_month), 2)             as latest_util_pct
-
-from monthly_combined
-group by register_based_id, base_month
-order by register_based_id;
-
-create table t_user_score_bnpl_repayment_temp as 
-with user_pool as (
-    select distinct m.user_id, a.register_based_id, a.base_month
-    from (select distinct register_based_id, base_month from t_temp_union_pool) a
-    inner join t_temp_user_map m on a.register_based_id = m.register_based_id
-    where m.user_id is not null
-),
-invoice_raw as (
-  select distinct
-    a.id_ as loan_request_id,
-    to_number(to_char(trunc(a.created_at), 'yyyymmdd')) as loan_request_date,
-    to_number(substr(to_char(trunc(a.created_at), 'yyyymmdd'), 1, 6)) as loan_request_month,
-    a.amount as loan_request_amt,
-    a.transaction_id as loan_transaction_id,
-    a.account_id as user_id,
-    a.bnpl_type as loan_type,
-    a.method as loan_method,
-    a.status as loan_status,
-    b.id_ as invoice_id,
-    b.amount as invoice_amt,
-    to_number(to_char(trunc(b.payment_date), 'yyyymmdd')) as invoice_date,
-    b.status as invoice_status,
-    c.amount as repayment_amt,
-    to_number(to_char(trunc(c.transaction_date), 'yyyymmdd')) as repayment_date,
-    c.payment_type as repayment_type,
-    c.status as repayment_status,
-    b.payment_date as invoice_payment_date,
-    c.transaction_date as repayment_transaction_date
-  from toki.dpr_tajet_bnpl_request a
-  left join toki.dpr_tajet_bnpl_invoice b on a.transaction_id = b.transaction_id and a.status not in ('CANCELLED', 'PENDING')
-  left join toki.dpr_tajet_bnpl_repayment c on b.id_ = c.invoice_id and c.status in ('SUCCESS') and c.payment_type not in ('REFUND')
-),
-repayment_aggregation as (
-  select
-    i.loan_request_id,
-    i.invoice_id,
-    i.loan_type,
-    i.loan_request_amt,
-    i.invoice_amt,
-    m.base_month,
-    sum(case when i.loan_type = 'UNSTRICTED_1' and i.repayment_date <= to_number(to_char(last_day(to_date(to_char(m.base_month), 'yyyymm')), 'yyyymmdd')) then i.repayment_amt else 0 end) as total_repayment_model_unrestricted,
-    max(case when i.loan_type = 'STRICTED_4' and i.repayment_date <= to_number(to_char(last_day(to_date(to_char(m.base_month), 'yyyymm')), 'yyyymmdd')) then i.repayment_amt else 0 end) as repayment_amt_model_restricted,
-    sum(case when i.loan_type = 'UNSTRICTED_1' and i.repayment_date < to_number(to_char(add_months(last_day(to_date(to_char(m.base_month), 'yyyymm')), -1), 'yyyymmdd')) then i.repayment_amt else 0 end) as total_repayment_before_base_unrestricted,
-    max(case when i.loan_type = 'STRICTED_4' and i.repayment_date < to_number(to_char(add_months(last_day(to_date(to_char(m.base_month), 'yyyymm')), -1), 'yyyymmdd')) then i.repayment_amt else 0 end) as repayment_amt_restricted
-  from invoice_raw i
-  inner join user_pool m on i.user_id = m.user_id
-  where to_number(substr(to_char(i.invoice_date), 1, 6))
-    between to_number(to_char(add_months(to_date(to_char(m.base_month), 'yyyymm'), -24), 'yyyymm'))
-        and to_number(to_char(add_months(last_day(to_date(to_char(m.base_month), 'yyyymm')), -1), 'yyyymm'))
-  group by i.loan_request_id, i.invoice_id, i.loan_type, i.loan_request_amt, i.invoice_amt, m.base_month
-),
-calculated_od as (
-  select
-    m.register_based_id,
-    i.loan_request_id,
-    i.invoice_id,
-    i.loan_type,
-    i.invoice_amt,
-    i.invoice_date,
-    i.loan_request_amt,
-    i.repayment_type,
-    i.repayment_transaction_date,
-    i.invoice_payment_date,
-    m.base_month,
-    r.total_repayment_before_base_unrestricted,
-    r.repayment_amt_restricted,
-    case
-      when to_number(substr(to_char(i.invoice_date), 1, 6)) between
-          to_number(to_char(add_months(to_date(to_char(m.base_month), 'yyyymm'), -24), 'yyyymm'))
-          and m.base_month
-      then
-        case
-          when i.repayment_type in ('REPAYMENT')
-            and (case
-              when i.loan_type = 'UNSTRICTED_1' and r.total_repayment_model_unrestricted >= i.loan_request_amt then 1
-              when i.loan_type = 'STRICTED_4' and r.repayment_amt_model_restricted >= i.invoice_amt then 1
-              else 0
-            end) = 1
-            and i.repayment_transaction_date is not null
-            and i.repayment_transaction_date <= last_day(to_date(to_char(m.base_month), 'yyyymm'))
-            then trunc(i.repayment_transaction_date) - trunc(i.invoice_payment_date)
-          when i.repayment_type in ('REPAYMENT')
-            and (case
-              when i.loan_type = 'UNSTRICTED_1' and r.total_repayment_model_unrestricted >= i.loan_request_amt then 1
-              when i.loan_type = 'STRICTED_4' and r.repayment_amt_model_restricted >= i.invoice_amt then 1
-              else 0
-            end) = 0
-            and i.repayment_transaction_date is not null
-            then last_day(to_date(to_char(m.base_month), 'yyyymm')) - trunc(i.invoice_payment_date)
-          when i.repayment_type is null
-            then last_day(to_date(to_char(m.base_month), 'yyyymm')) - trunc(i.invoice_payment_date)
-          else 0
-        end
-      else null
-    end as od
-  from invoice_raw i
-  inner join user_pool m on i.user_id = m.user_id
-  left join repayment_aggregation r on i.loan_request_id = r.loan_request_id and i.invoice_id = r.invoice_id and m.base_month = r.base_month
-  where to_number(substr(to_char(i.invoice_date), 1, 6))
-    between to_number(to_char(add_months(to_date(to_char(m.base_month), 'yyyymm'), -24), 'yyyymm'))
-        and to_number(to_char(add_months(last_day(to_date(to_char(m.base_month), 'yyyymm')), -1), 'yyyymm'))
-)
-
-select distinct
-  register_based_id,
-  base_month,
-
-  sum(case when od > 0 and repayment_type = 'REPAYMENT' then invoice_amt else 0 end) as od_inv_amt_w_2y,
-  sum(case when od between 16 and 30 and repayment_type = 'REPAYMENT' then invoice_amt else 0 end) as od_30_inv_amt_w_2y,
-  sum(case when od between 31 and 60 and repayment_type = 'REPAYMENT' then invoice_amt else 0 end) as od_60_inv_amt_w_2y,
-  sum(case when od between 91 and 180 and repayment_type = 'REPAYMENT' then invoice_amt else 0 end) as od_180_inv_amt_w_2y,
-  max(od) as max_od_w_2y,
-  sum(od) as sum_od_w_2y,
-
-  sum(case when od > 0 and repayment_type = 'REPAYMENT' and to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -12), 'yyyymm')) then invoice_amt else 0 end) as od_inv_amt_w_1y,
-  sum(case when od between 16 and 30 and repayment_type = 'REPAYMENT' and to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -12), 'yyyymm')) then invoice_amt else 0 end) as od_30_inv_amt_w_1y,
-
-  sum(case when od > 0 and repayment_type = 'REPAYMENT' and to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_inv_amt_w_6m,
-  sum(case when od between 1 and 15 and repayment_type = 'REPAYMENT' and to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_15_inv_amt_w_6m,
-  count(distinct case when od between 16 and 30 and repayment_type = 'REPAYMENT' and to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_id end) as od_30_inv_cnt_w_6m,
-  sum(case when od between 16 and 30 and repayment_type = 'REPAYMENT' and to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_30_inv_amt_w_6m,
-  sum(case when od between 61 and 90 and repayment_type = 'REPAYMENT' and to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_90_inv_amt_w_6m,
-  max(case when to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then od end) as max_od_w_6m
-
-from calculated_od
-group by register_based_id, base_month;
-
-create table t_user_score_credit_repayment_temp as 
-with tmp_credit_invoice as (
-  select
-    b.register_based_id,
-    b.base_month,
-    i.invoice_id,
-    i.invoice_type,
-    i.principal_amt     as invoice_amt,
-    i.target_month_date as invoice_month,
-    i.fully_paid_date,
-    i.due_date,
-    case
-      when trunc(i.due_date, 'MM') between add_months(to_date(to_char(b.base_month), 'yyyymm'), -24)
-        and add_months(to_date(to_char(b.base_month), 'yyyymm'), -1)
-      then
-        case
-          when i.fully_paid_date is not null
-            and trunc(i.fully_paid_date, 'MM') <= to_date(to_char(b.base_month), 'yyyymm')
-            then case when trunc(i.fully_paid_date) - trunc(i.due_date) >= 0
-                      then trunc(i.fully_paid_date) - trunc(i.due_date) else 0 end
-          else case when to_date(to_char(b.base_month), 'yyyymm') - trunc(i.due_date) >= 0
-                    then to_date(to_char(b.base_month), 'yyyymm') - trunc(i.due_date) else 0 end
-        end
-      else null
-    end as od
-  from toki.credit_invoice i
-  inner join toki.credit_credit cc on i.credit_id = cc.credit_id   
-  inner join t_temp_user_map m on cc.user_id = m.user_id
-  inner join (select distinct register_based_id, base_month from t_temp_union_pool) b on m.register_based_id = b.register_based_id
-    and trunc(i.due_date, 'MM') between add_months(to_date(to_char(b.base_month), 'yyyymm'), -24)
-      and add_months(to_date(to_char(b.base_month), 'yyyymm'), -1)
-      and i.principal_amt > 0
-    --and i.invoice_type = 'MONTHLY'
-)
-
-select distinct
-  register_based_id,
-  base_month,
-
-  sum(case when od > 0 and invoice_type = 'MONTHLY' then invoice_amt else 0 end) as od_inv_amt_w_2y,
-  sum(case when od between 16 and 30 and invoice_type = 'MONTHLY' then invoice_amt else 0 end) as od_30_inv_amt_w_2y,
-  sum(case when od between 31 and 60 and invoice_type = 'MONTHLY' then invoice_amt else 0 end) as od_60_inv_amt_w_2y,
-  sum(case when od between 91 and 180 and invoice_type = 'MONTHLY' then invoice_amt else 0 end) as od_180_inv_amt_w_2y,
-  sum(case when trunc(fully_paid_date, 'MM') <= to_date(to_char(base_month), 'yyyymm') and invoice_type = 'INSTANT' then invoice_amt else 0 end) as instant_inv_amt_w_2y,
-  max(od) as max_od_w_2y,
-  sum(od) as sum_od_w_2y,
-
-  sum(case when od > 0 and invoice_type = 'MONTHLY' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -12) then invoice_amt else 0 end) as od_inv_amt_w_1y,
-  sum(case when od between 16 and 30 and invoice_type = 'MONTHLY' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -12) then invoice_amt else 0 end) as od_30_inv_amt_w_1y,
-  sum(case when od > 0 and invoice_type = 'MONTHLY' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -6) then invoice_amt else 0 end) as od_inv_amt_w_6m,
-  sum(case when od between 1 and 15 and invoice_type = 'MONTHLY' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -6) then invoice_amt else 0 end) as od_15_inv_amt_w_6m,
-  count(distinct case when od between 16 and 30 and invoice_type = 'MONTHLY' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -6) then invoice_id end) as od_30_inv_cnt_w_6m,
-  sum(case when od between 16 and 30 and invoice_type = 'MONTHLY' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -6) then invoice_amt else 0 end) as od_30_inv_amt_w_6m,
-  sum(case when od between 61 and 90 and invoice_type = 'MONTHLY' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -6) then invoice_amt else 0 end) as od_90_inv_amt_w_6m,
-  count(distinct case when trunc(fully_paid_date, 'MM') <= to_date(to_char(base_month), 'yyyymm') and invoice_type = 'INSTANT' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -6) then invoice_id end) as instant_inv_cnt_w_6m,
-  max(case when trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -6) then od end) as max_od_w_6m
-
-from tmp_credit_invoice
-group by register_based_id, base_month;
-
-create table t_user_score_lease_repayment_temp as
-with tmp_handset_invoice as (
-    select 
-        b.loan_id,
-        a.id as invoice_id,
-        b.id as loan_invoice_id,
-        a.invoice_type,
-        a.principal_amt,
-        to_date(a.due_date, 'dd-mon-yy') as due_date
-    from toki.handset_invoice a
-    left join toki.handset_loan_invoice b on a.id = b.invoice_id
-),
-tmp_handset_repayment as (
-    select 
-        loan_id,
-        loan_invoice_id,
-        max(createdat) as createdat
-    from (
-        select 
-            loan_id,
-            loan_invoice_id,
-            to_date(created_date, 'dd-mon-yy') as createdat
-        from toki.handset_loan_repayment
-    )
-    group by loan_id, loan_invoice_id
-),
-handset_combined as (
-    select distinct
-        d.register_based_id,
-        d.base_month,
-        a.loan_id,
-        to_number(to_char(trunc(c.loan_activated_date), 'yyyymmdd')) as loan_activated_date,
-        a.invoice_id,
-        to_number(a.principal_amt) as invoice_amt,
-        a.invoice_type,
-        to_number(to_char(trunc(rep.createdat), 'yyyymmdd')) as paid_date,
-        to_number(to_char(trunc(a.due_date), 'yyyymmdd')) as due_date,
-        case
-            when trunc(a.due_date, 'MM') between add_months(to_date(to_char(d.base_month), 'yyyymm'), -24)
-        and add_months(to_date(to_char(d.base_month), 'yyyymm'), -1)
-            then
-                case
-                    when rep.createdat is not null
-                        and trunc(rep.createdat, 'MM') <= to_date(to_char(d.base_month), 'yyyymm')
-                    then trunc(rep.createdat) - trunc(a.due_date)
-                    else to_date(to_char(d.base_month), 'yyyymm') - trunc(a.due_date)
-                end
-            else null
-        end as od
-    from tmp_handset_invoice a
-    left join tmp_handset_repayment rep on a.loan_id = rep.loan_id and a.loan_invoice_id = rep.loan_invoice_id
-    inner join toki.handset_orders b on to_number(a.loan_id) = b.loanid  --sync n zogsson tul orluulah shaardlagtai
-    inner join toki.handset_loan c on a.loan_id = c.id
-    inner join t_temp_user_map m on b.accountid = m.user_id
-    inner join (select distinct register_based_id, base_month from t_temp_union_pool) d on m.register_based_id = d.register_based_id
-        and trunc(a.due_date, 'MM') between add_months(to_date(to_char(d.base_month), 'yyyymm'), -24)
-        and add_months(to_date(to_char(d.base_month), 'yyyymm'), -1)
-    --where a.invoice_type = 'SCHEDULED' 
-    where c.is_staff_deal = 0
-    and a.principal_amt > 0
-)
-
-select distinct
-  register_based_id,
-  base_month,
-
-
-  sum(case when od > 0 and invoice_type = 'SCHEDULED' then invoice_amt else 0 end) as od_inv_amt_w_2y,
-  sum(case when od between 16 and 30 and invoice_type = 'SCHEDULED' then invoice_amt else 0 end) as od_30_inv_amt_w_2y,
-  sum(case when od between 31 and 60 and invoice_type = 'SCHEDULED' then invoice_amt else 0 end) as od_60_inv_amt_w_2y,
-  sum(case when od between 91 and 180 and invoice_type = 'SCHEDULED' then invoice_amt else 0 end) as od_180_inv_amt_w_2y,
-  sum(case when to_number(substr(to_char(paid_date), 1, 6)) <= base_month and invoice_type = 'INSTANT' then invoice_amt else 0 end) as instant_inv_amt_w_2y,
-  max(od) as max_od_w_2y,
-  sum(od) as sum_od_w_2y,
-
-  sum(case when od > 0 and invoice_type = 'SCHEDULED' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -12), 'yyyymm')) then invoice_amt else 0 end) as od_inv_amt_w_1y,
-  sum(case when od between 16 and 30 and invoice_type = 'SCHEDULED' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -12), 'yyyymm')) then invoice_amt else 0 end) as od_30_inv_amt_w_1y,
-
-  sum(case when od > 0 and invoice_type = 'SCHEDULED' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_inv_amt_w_6m,
-  sum(case when od between 1 and 15 and invoice_type = 'SCHEDULED' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_15_inv_amt_w_6m,
-  count(distinct case when od between 16 and 30 and invoice_type = 'SCHEDULED' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_id end) as od_30_inv_cnt_w_6m,
-  sum(case when od between 16 and 30 and invoice_type = 'SCHEDULED' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_30_inv_amt_w_6m,
-  sum(case when od between 61 and 90 and invoice_type = 'SCHEDULED' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_90_inv_amt_w_6m,
-  count(distinct case when to_number(substr(to_char(paid_date), 1, 6)) <= base_month and invoice_type = 'INSTANT' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_id end) as instant_inv_cnt_w_6m,
-  max(case when to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then od end) as max_od_w_6m
-
-from handset_combined
-group by register_based_id, base_month;
-
-create table t_user_score_credit_usage_temp as 
-with base_data as (
-  select
-    t.register_based_id,
-    t.base_month,
-    lr.merchant_name,
-    lr.product_name,
-    lr.product_price,
-    lr.created_date,
-    trunc(lr.created_date) as usage_date
-
-  from toki.credit_loan_request lr
-  inner join toki.credit_credit cc on lr.credit_id = cc.credit_id
-  inner join t_temp_user_map m on cc.user_id = m.user_id
-  inner join (select distinct register_based_id, base_month from t_temp_union_pool) t on m.register_based_id = t.register_based_id
-  and trunc(lr.created_date, 'MM') between add_months(to_date(to_char(t.base_month), 'yyyymm'), -24)
-  and add_months(to_date(to_char(t.base_month), 'yyyymm'), -1)
-  and lr.loan_type = 'PURCHASE' and lr.request_status = 'SUCCESS'
-),
-daily_usage as (
-  select
-    register_based_id,
-    base_month,
-    usage_date,
-    usage_date - row_number() over (partition by register_based_id, base_month order by usage_date) as island_id
-  from (
-    select distinct register_based_id, base_month, usage_date
-    from base_data
-  )
-)
-  select
-    register_based_id,
-    base_month,
-
-    count(*)                                                                                 as credit_usage_cnt_w_2y,
-    sum(product_price)                                                                       as credit_usage_amt_w_2y,
-    sum(case when usage_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -12) then product_price end)                 as credit_usage_amt_w_1y,
-    sum(case when usage_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -3) then product_price end)                 as credit_usage_amt_w_3m,
-    to_date(to_char(base_month), 'yyyymm') - max(trunc(created_date))                                                                 as days_since_last_credit_usage
-
-  from base_data
-  group by register_based_id, base_month;
-
-create table t_user_score_lease_usage_temp as
-with raw_data as (
-select
-  accountid as userid,
-  json_value(products,  '$[0].modelName') as model_name,
-  json_value(products,  '$[0].type') as product_type,
-  to_number(loanamount) as loanamount,
-  to_number(to_char(trunc(to_date(substr(createdat, 1, 10), 'yyyy-mm-dd')), 'yyyymmdd')) as createdat
-from (
-  select * from toki.handset_orders
-  where orderstatus not in ('PENDING', 'CANCELLED')
-)
-
-union all
-
-select
-  json_value(customer, '$.accountId') as userid,
-  json_value(products,  '$[0].modelName') as model_name,
-  json_value(products,  '$[0].inventoryType') as product_type,
-  to_number(totalprice) as loanamount,
-  to_number(to_char(trunc(createdat), 'yyyymmdd')) as createdat
-from (
-  select * from toki.marketplace_handset_orders
-  where orderstatus not in ('PENDING', 'CANCELLED')
-)
-),
-base_data as (
-  select
-    t.register_based_id,
-    t.base_month,
-    r.model_name,
-    r.product_type,
-    r.loanamount,
-    r.createdat,
-    to_date(to_char(r.createdat), 'yyyymmdd') as usage_date,
-    case
-      when regexp_like(r.model_name, 'iphone',                                        'i') then 'phone_iphone'
-      when regexp_like(r.model_name, 'apple.+watch|apple watch',                      'i') then 'watch_apple'
-      when regexp_like(r.model_name, 'airpod|magsafe',                                'i') then 'accessory_apple'
-      when regexp_like(r.model_name, '(samsung|galaxy).*(watch|band)',                'i') then 'watch_samsung'
-      when regexp_like(r.model_name, 'galaxy.*buds|samsung.*(adapter|headphone)|akg', 'i') then 'accessory_samsung'
-      when regexp_like(r.model_name, 'samsung|galaxy',                                'i') then 'phone_samsung'
-      when regexp_like(r.model_name, 'huawei.*(watch|band|fit)',                      'i') then 'watch_huawei'
-      when regexp_like(r.model_name, 'huawei.*(free.?buds|freebuds)',                 'i') then 'accessory_huawei'
-      when regexp_like(r.model_name, 'huawei',                                        'i') then 'phone_huawei'
-      when regexp_like(r.model_name, 'zte',                                           'i') then 'phone_zte'
-      when regexp_like(r.model_name, 'adapter',                                       'i') then 'accessory_adapter'
-      else 'other'
-    end as model_group
-
-  from raw_data r
-  inner join t_temp_user_map m on r.userid = m.user_id
-  inner join (select distinct register_based_id, base_month from t_temp_union_pool) t on m.register_based_id = t.register_based_id
-  and trunc(to_date(to_char(r.createdat), 'yyyymmdd'), 'MM') between add_months(to_date(to_char(t.base_month), 'yyyymm'), -24)
-  and add_months(to_date(to_char(t.base_month), 'yyyymm'), -1)
-),
-
-daily_usage as (
-  select
-    register_based_id,
-    base_month,
-    usage_date,
-    usage_date - row_number() over (partition by register_based_id, base_month order by usage_date) as island_id
-  from (
-    select distinct register_based_id, base_month, usage_date
-    from base_data
-  )
-)
-  select
-    register_based_id,
-    base_month,
-
-    count(*)                                                                                 as lease_usage_cnt_w_2y,
-    sum(loanamount)                                                                          as lease_usage_amt_w_2y,
-    sum(case when usage_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -12) then loanamount end)                   as lease_usage_amt_w_1y,
-    sum(case when usage_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -3) then loanamount end)                   as lease_usage_amt_w_3m,
-
-    to_date(to_char(base_month), 'yyyymm') - max(usage_date)                                                                    as days_since_last_lease_usage
-
-  from base_data
-  group by register_based_id, base_month;
-
-create table t_user_score_age_temp as
-select
-  register_based_id,
-  base_month,
-  floor(months_between(
-    to_date(to_char(base_month, 'FM000000'), 'YYYYMM'),
-    min(parsed_dob)
-  ) / 12) as age
-from (
-  select
-    a.register_based_id,
-    a.base_month,
-    case
-      when b.dob like '____-__-__'
-        and to_number(substr(b.dob, 6, 2)) between 1 and 12
-        and to_number(substr(b.dob, 9, 2)) between 1 and 31
-        then to_date(b.dob, 'YYYY-MM-DD')
-      when b.dob like '__/__/____'
-        and to_number(substr(b.dob, 4, 2)) between 1 and 12
-        and to_number(substr(b.dob, 1, 2)) between 1 and 31
-        then to_date(b.dob, 'DD/MM/YYYY')
-    end as parsed_dob
-  from (select distinct register_based_id, base_month from t_temp_union_pool) a
-  inner join t_temp_user_map m on a.register_based_id = m.register_based_id
-  inner join toki.dpr_maat_customers b on m.user_id = b.identifier
-  where b.dob is not null
-)
-group by register_based_id, base_month;
-
-create table t_user_score_bnpl_usage_temp as
-with merchant_raw as (
-  select
-    t.register_based_id,
-    trunc(b.transaction_date) as usage_date,
-    a.transaction_id,
-    a.amount,
-    c.merchant_name,
-    t.base_month
-  from toki.dpr_tajet_bnpl_request a
-  left join toki.dpr_tajet_teller_transactions b on b.identifier = a.transaction_id
-  left join t_merchant_lookup c on c.merchant_id = b.target_account_identifier
-  inner join t_temp_user_map m on a.account_id = m.user_id
-  inner join (select distinct register_based_id, base_month from t_temp_union_pool) t on m.register_based_id = t.register_based_id
-    and trunc(b.transaction_date, 'MM') between add_months(to_date(to_char(t.base_month), 'yyyymm'), -24)
-    and add_months(to_date(to_char(t.base_month), 'yyyymm'), -1)
-  where status <> 'CANCELED'
-)
-  select
-    register_based_id,
-    base_month,
-
-    count(*)                                                                                 as bnpl_usage_cnt_w_2y,
-    sum(amount)                                                                              as bnpl_usage_amt_w_2y,
-    sum(case when usage_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -12) then amount end)                       as bnpl_usage_amt_w_1y,
-    sum(case when usage_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -3) then amount end)                       as bnpl_usage_amt_w_3m,
-
-    to_date(to_char(base_month), 'yyyymm') - max(usage_date)                                                                          as days_since_last_bnpl_usage
-
-  from merchant_raw
-  group by register_based_id, base_month;
-
-create table t_user_score_feature_set_temp as
-select
-  t.register_based_id,
-  t.user_id,
-  t.mob_group,
-  t.base_month,
-  t.mob,
-  t.model_od,
-
-  ag.age,
-
-  g.sum_gaming_amt_w_6m,
-
-  pk.sum_parking_amt_w_6m,
-
-  sm.data_payment_count_sum_w3m,
-  sm.transport_count_sum_w6m,
-
-  sm.merchant_group_count_w_1m,
-
-  co.is_own_car,
-
-  txn.max_trans_cnt_w_6m,
-  txn.std_trans_amt_w_6m,
-  txn.sum_trans_amt_w_1m,
-  txn.max_trans_amt_credit_w_6m,
-  txn.std_trans_amt_credit_w_6m,
-  txn.sum_trans_amt_card_w_1m,
-  txn.std_trans_cnt_night_w_6m,
-  txn.sum_trans_cnt_morning_w_6m,
-  txn.sum_trans_cnt_non_credit_w_1m,
-  txn.sum_trans_amt_non_credit_w_6m,
-  txn.std_trans_amt_non_credit_w_3m,
-  txn.distinct_transaction_months_w_6m,
-
-  wlt.max_balance_w_6m,
-  wlt.avg_min_balance_w_6m,
-  wlt.max_max_balance_w_3m,
-  wlt.avg_balance_w_1m,
-
-  fr.avg_fire_model_cnt_w_6m,
-
-  kyc.last_kyctype_true,
-
-  mp.night_usage_count_std_w_6m,
-  mp.morning_usage_count_sum_w_1m,
-  mp.morning_usage_per_w_6m,
-  mp.night_usage_month_w_6m,
-  mp.mp_usage_count_sum_w_6m,
-  mp.mp_usage_count_std_w_6m,
-
-  case
-    when nv.same_double = 1 or nv.double_double = 1 or nv.triple_start = 1 or nv.triple_end = 1
-      or nv.valid_bronze = 1 or nv.premium_index = 1 or nv.gold_pre = 1 or nv.silver_pre = 1
-      or nv.gold_e = 1 or nv.cons_gold = 1 or nv.sub_super_end = 1 or nv.super_ended = 1
-    then 1 else 0
-  end as is_number_valued,
-
-  te.toki_tenure as dynamic_toki_tenure,
-  te.sign_tenure as dynamic_sign_tenure,
-
-  alu.max_util_pct_w_3m,
-  alu.max_util_pct_w_2y,
-  alu.latest_util_pct,
-  alu.min_util_pct_w_6m,
-
-  ar.req_cnt_w_2y,
-  ar.req_cnt_w_1y,
-
-  case
-    when br.max_od_w_2y is null and cr.max_od_w_2y is null and lr.max_od_w_2y is null then null
-    else greatest(nvl(br.max_od_w_2y, 0), nvl(cr.max_od_w_2y, 0), nvl(lr.max_od_w_2y, 0))
-  end as loan_max_od_w_2y,
-  case
-    when br.max_od_w_6m is null and cr.max_od_w_6m is null and lr.max_od_w_6m is null then null
-    else greatest(nvl(br.max_od_w_6m, 0), nvl(cr.max_od_w_6m, 0), nvl(lr.max_od_w_6m, 0))
-  end as loan_max_od_w_6m,
-  case
-    when br.sum_od_w_2y is null and cr.sum_od_w_2y is null and lr.sum_od_w_2y is null then null
-    else nvl(br.sum_od_w_2y, 0) + nvl(cr.sum_od_w_2y, 0) + nvl(lr.sum_od_w_2y, 0)
-  end as loan_sum_od_w_2y,
-  case
-    when bu.bnpl_usage_amt_w_1y is null and cu.credit_usage_amt_w_1y is null and lu.lease_usage_amt_w_1y is null then null
-    else nvl(bu.bnpl_usage_amt_w_1y, 0) + nvl(cu.credit_usage_amt_w_1y, 0) + nvl(lu.lease_usage_amt_w_1y, 0)
-  end as loan_usage_amt_w_1y,
-  case
-    when br.od_90_inv_amt_w_6m is null and cr.od_90_inv_amt_w_6m is null and lr.od_90_inv_amt_w_6m is null then null
-    else nvl(br.od_90_inv_amt_w_6m, 0) + nvl(cr.od_90_inv_amt_w_6m, 0) + nvl(lr.od_90_inv_amt_w_6m, 0)
-  end as loan_od_90_inv_amt_w_6m,
-  case
-    when br.od_inv_amt_w_6m is null and cr.od_inv_amt_w_6m is null and lr.od_inv_amt_w_6m is null then null
-    else nvl(br.od_inv_amt_w_6m, 0) + nvl(cr.od_inv_amt_w_6m, 0) + nvl(lr.od_inv_amt_w_6m, 0)
-  end as loan_od_inv_amt_w_6m,
-  case
-    when bu.days_since_last_bnpl_usage is null and cu.days_since_last_credit_usage is null and lu.days_since_last_lease_usage is null then null
-    else least(nvl(bu.days_since_last_bnpl_usage, 9999), nvl(cu.days_since_last_credit_usage, 9999), nvl(lu.days_since_last_lease_usage, 9999))
-  end as days_since_last_loan_usage,
-  case
-    when br.od_180_inv_amt_w_2y is null and cr.od_180_inv_amt_w_2y is null and lr.od_180_inv_amt_w_2y is null then null
-    else nvl(br.od_180_inv_amt_w_2y, 0) + nvl(cr.od_180_inv_amt_w_2y, 0) + nvl(lr.od_180_inv_amt_w_2y, 0)
-  end as loan_od_180_inv_amt_w_2y,
-  case
-    when br.od_15_inv_amt_w_6m is null and cr.od_15_inv_amt_w_6m is null and lr.od_15_inv_amt_w_6m is null then null
-    else nvl(br.od_15_inv_amt_w_6m, 0) + nvl(cr.od_15_inv_amt_w_6m, 0) + nvl(lr.od_15_inv_amt_w_6m, 0)
-  end as loan_od_15_inv_amt_w_6m,
-  case
-    when bu.bnpl_usage_amt_w_2y is null and cu.credit_usage_amt_w_2y is null and lu.lease_usage_amt_w_2y is null then null
-    else nvl(bu.bnpl_usage_amt_w_2y, 0) + nvl(cu.credit_usage_amt_w_2y, 0) + nvl(lu.lease_usage_amt_w_2y, 0)
-  end as loan_usage_amt_w_2y,
-  case
-    when br.od_30_inv_amt_w_6m is null and cr.od_30_inv_amt_w_6m is null and lr.od_30_inv_amt_w_6m is null then null
-    else nvl(br.od_30_inv_amt_w_6m, 0) + nvl(cr.od_30_inv_amt_w_6m, 0) + nvl(lr.od_30_inv_amt_w_6m, 0)
-  end as loan_od_30_inv_amt_w_6m,
-  case
-    when cr.instant_inv_cnt_w_6m is null and lr.instant_inv_cnt_w_6m is null then null
-    else nvl(cr.instant_inv_cnt_w_6m, 0) + nvl(lr.instant_inv_cnt_w_6m, 0)
-  end as loan_instant_inv_cnt_w_6m,
-  case
-    when bu.bnpl_usage_amt_w_3m is null and cu.credit_usage_amt_w_3m is null and lu.lease_usage_amt_w_3m is null then null
-    else nvl(bu.bnpl_usage_amt_w_3m, 0) + nvl(cu.credit_usage_amt_w_3m, 0) + nvl(lu.lease_usage_amt_w_3m, 0)
-  end as loan_usage_amt_w_3m,
-  case
-    when br.od_inv_amt_w_1y is null and cr.od_inv_amt_w_1y is null and lr.od_inv_amt_w_1y is null then null
-    else nvl(br.od_inv_amt_w_1y, 0) + nvl(cr.od_inv_amt_w_1y, 0) + nvl(lr.od_inv_amt_w_1y, 0)
-  end as loan_od_inv_amt_w_1y,
-  case
-    when br.od_30_inv_cnt_w_6m is null and cr.od_30_inv_cnt_w_6m is null and lr.od_30_inv_cnt_w_6m is null then null
-    else nvl(br.od_30_inv_cnt_w_6m, 0) + nvl(cr.od_30_inv_cnt_w_6m, 0) + nvl(lr.od_30_inv_cnt_w_6m, 0)
-  end as loan_od_30_inv_cnt_w_6m,
-  case
-    when br.od_30_inv_amt_w_1y is null and cr.od_30_inv_amt_w_1y is null and lr.od_30_inv_amt_w_1y is null then null
-    else nvl(br.od_30_inv_amt_w_1y, 0) + nvl(cr.od_30_inv_amt_w_1y, 0) + nvl(lr.od_30_inv_amt_w_1y, 0)
-  end as loan_od_30_inv_amt_w_1y,
-  case
-    when br.od_inv_amt_w_2y is null and cr.od_inv_amt_w_2y is null and lr.od_inv_amt_w_2y is null then null
-    else nvl(br.od_inv_amt_w_2y, 0) + nvl(cr.od_inv_amt_w_2y, 0) + nvl(lr.od_inv_amt_w_2y, 0)
-  end as loan_od_inv_amt_w_2y,
-  case
-    when br.od_30_inv_amt_w_2y is null and cr.od_30_inv_amt_w_2y is null and lr.od_30_inv_amt_w_2y is null then null
-    else nvl(br.od_30_inv_amt_w_2y, 0) + nvl(cr.od_30_inv_amt_w_2y, 0) + nvl(lr.od_30_inv_amt_w_2y, 0)
-  end as loan_od_30_inv_amt_w_2y,
-  case
-    when bu.bnpl_usage_cnt_w_2y is null and cu.credit_usage_cnt_w_2y is null and lu.lease_usage_cnt_w_2y is null then null
-    else nvl(bu.bnpl_usage_cnt_w_2y, 0) + nvl(cu.credit_usage_cnt_w_2y, 0) + nvl(lu.lease_usage_cnt_w_2y, 0)
-  end as loan_usage_cnt_w_2y,
-  case
-    when br.od_60_inv_amt_w_2y is null and cr.od_60_inv_amt_w_2y is null and lr.od_60_inv_amt_w_2y is null then null
-    else nvl(br.od_60_inv_amt_w_2y, 0) + nvl(cr.od_60_inv_amt_w_2y, 0) + nvl(lr.od_60_inv_amt_w_2y, 0)
-  end as loan_od_60_inv_amt_w_2y,
-  case
-    when cr.instant_inv_amt_w_2y is null and lr.instant_inv_amt_w_2y is null then null
-    else nvl(cr.instant_inv_amt_w_2y, 0) + nvl(lr.instant_inv_amt_w_2y, 0)
-  end as loan_instant_inv_amt_w_2y
-
-from t_temp_union_pool t
-
-left join t_user_score_age_temp               ag  on t.register_based_id = ag.register_based_id  and t.base_month = ag.base_month
-left join t_user_score_gaming_temp1            g   on t.register_based_id = g.register_based_id   and t.base_month = g.base_month
-left join t_user_score_parking_temp           pk  on t.register_based_id = pk.register_based_id  and t.base_month = pk.base_month
-left join t_user_score_service_more_temp      sm  on t.register_based_id = sm.register_based_id  and t.base_month = sm.base_month
-left join t_user_score_car_ownership_temp     co  on t.register_based_id = co.register_based_id  and t.base_month = co.base_month
-left join t_user_score_transaction_temp       txn on t.register_based_id = txn.register_based_id and t.base_month = txn.base_month
-left join t_user_score_wallet_temp            wlt on t.register_based_id = wlt.register_based_id and t.base_month = wlt.base_month
-left join t_user_score_fire_temp              fr  on t.register_based_id = fr.register_based_id  and t.base_month = fr.base_month
-left join t_user_score_kyc_temp               kyc on t.register_based_id = kyc.register_based_id and t.base_month = kyc.base_month
-left join t_user_score_mp_usage_temp          mp  on t.register_based_id = mp.register_based_id  and t.base_month = mp.base_month
-left join t_user_score_number_value_temp      nv  on t.register_based_id = nv.register_based_id  and t.base_month = nv.base_month
-left join t_user_score_tenure_temp            te  on t.register_based_id = te.register_based_id  and t.base_month = te.base_month
-left join t_user_score_all_limit_usage_temp   alu on t.register_based_id = alu.register_based_id and t.base_month = alu.base_month
-left join t_user_score_all_request_temp       ar  on t.register_based_id = ar.register_based_id  and t.base_month = ar.base_month
-left join t_user_score_bnpl_repayment_temp    br  on t.register_based_id = br.register_based_id  and t.base_month = br.base_month
-left join t_user_score_bnpl_usage_temp        bu  on t.register_based_id = bu.register_based_id  and t.base_month = bu.base_month
-left join t_user_score_credit_repayment_temp  cr  on t.register_based_id = cr.register_based_id  and t.base_month = cr.base_month
-left join t_user_score_credit_usage_temp      cu  on t.register_based_id = cu.register_based_id  and t.base_month = cu.base_month
-left join t_user_score_lease_repayment_temp   lr  on t.register_based_id = lr.register_based_id  and t.base_month = lr.base_month
-left join t_user_score_lease_usage_temp       lu  on t.register_based_id = lu.register_based_id  and t.base_month = lu.base_month;
-
-drop table t_user_score_wallet_temp;
-drop table t_user_score_transaction_temp;
-drop table t_user_score_tenure_temp;
-drop table t_user_score_service_more_temp;
-drop table t_user_score_parking_temp;
-drop table t_user_score_number_value_temp;
-drop table t_user_score_mp_usage_temp;
-drop table t_user_score_kyc_temp;
-drop table t_user_score_gaming_temp;
-drop table t_user_score_fire_temp;
-drop table t_user_score_car_ownership_temp;
-drop table t_user_score_all_request_temp;
-drop table t_user_score_all_limit_usage_temp;
-drop table t_user_score_bnpl_repayment_temp;
-drop table t_user_score_credit_repayment_temp;
-drop table t_user_score_lease_repayment_temp;
-drop table t_user_score_credit_usage_temp;
-drop table t_user_score_lease_usage_temp;
-drop table t_user_score_age_temp;
-drop table t_user_score_bnpl_usage_temp;
+-- penalty_raw as (
+--   select
+--     t.user_id,
+--     t.plate_number,
+--     jt.amount,
+--     to_number(to_char(to_date(substr(t.paid_date, 1, 10), 'yyyy-mm-dd'), 'yyyymmdd')) as txn_date
+--   from (
+--     select *
+--     from toki.mobility_project_penaltys_invoices
+--     where to_number(to_char(to_date(substr(createdat, 1, 10), 'yyyy-mm-dd'), 'yyyymmdd')) > 20240531
+--   ) t
+--   left join json_table(
+--     replace(replace(replace(t.inv_data, '''', '"'), 'False', 'false'), 'None', 'null'),
+--     '$[*]'
+--     columns (
+--       amount  number  path '$.amount'
+--     )
+--   ) jt on 1 = 1
+--   where t.paid_date is not null
+--     and jt.amount > 0
+-- ),
+-- parking_raw as (
+--   select
+--     a.user_id,
+--     a.plate_number,
+--     to_number(a.amount) as amount,
+--     to_number(to_char(to_date(substr(a.created_date, 1, 10), 'yyyy-mm-dd'), 'yyyymmdd')) as txn_date
+--   from toki.mobility_project_parking_invoices a
+--   inner join toki.mobility_project_parking_park_lists b
+--     on a.parking_id = b.parking_id and b.status = 'working'
+--   where a.pay = 'True'
+-- ),
+-- car_raw as (
+--   select user_id, plate_number, amount, txn_date from penalty_raw
+--   union all
+--   select user_id, plate_number, amount, txn_date from parking_raw
+-- ),
+-- car_base as (
+--   select
+--     a.register_based_id,
+--     a.base_month,
+--     b.plate_number,
+--     b.owner_tag,
+--     sum(cr.amount) as plate_total_amt,
+--     case
+--       when b.owner_tag = 'Y' then 'Y'
+--       when sum(cr.amount) > 50000 then 'Y'
+--       else 'N'
+--     end as effective_owner_tag
+--   from (select distinct register_based_id, base_month from t_temp_union_pool) a
+--   inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+--   inner join mobility_cars b
+--     on m.user_id = b.user_id
+--     and to_number(to_char(to_date(b.saved_createdat, 'yyyy-mm-dd'), 'yyyymm')) <= a.base_month
+--   left join car_raw cr
+--     on cr.user_id = b.user_id
+--     and cr.plate_number = b.plate_number
+--     and trunc(cr.txn_date / 100) <= a.base_month
+--   group by a.register_based_id, a.base_month, b.plate_number, b.owner_tag
+-- )
+
+-- select
+--   register_based_id,
+--   base_month,
+--   max(case when effective_owner_tag = 'Y' then 1 else 0 end)  as is_own_car
+
+-- from car_base
+-- group by register_based_id, base_month
+-- order by register_based_id;
+
+-- create table t_user_score_all_request_temp as
+-- with request_raw as (
+--   select distinct
+--     p.register_based_id,
+--     p.base_month,
+--     trunc(r.decision_engine_is_successful_date) as request_date
+--   from toki.credit_zms_request r
+--   inner join toki.credit_credit c on r.borrower_id = c.borrower_id
+--   inner join t_temp_user_map m on c.user_id = m.user_id
+--   inner join (select distinct register_based_id, base_month from t_temp_union_pool) p on m.register_based_id = p.register_based_id
+--   where r.decision_engine_is_successful_date is not null
+--     and to_number(to_char(r.decision_engine_is_successful_date, 'yyyymm')) between
+--         to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -24), 'yyyymm'))
+--         and to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -1), 'yyyymm'))
+
+--   union all
+
+--   select distinct
+--     p.register_based_id,
+--     p.base_month,
+--     trunc(r.decision_engine_successful_date) as request_date
+--   from toki.handset_tmp_limit_request r
+--   inner join t_temp_user_map m on r.user_id = m.user_id
+--   inner join (select distinct register_based_id, base_month from t_temp_union_pool) p on m.register_based_id = p.register_based_id
+--   where r.decision_engine_successful_date is not null
+--     and to_number(to_char(r.decision_engine_successful_date, 'yyyymm')) between
+--         to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -24), 'yyyymm'))
+--         and to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -1), 'yyyymm'))
+
+--   union all
+
+--   select distinct
+--     p.register_based_id,
+--     p.base_month,
+--     trunc(r.decision_engine_success_date) as request_date
+--   from toki.bnpl_limit_request r
+--   inner join toki.bnpl_account b on r.bnpl_account_id = b.id_
+--   inner join t_temp_user_map m on b.user_id = m.user_id
+--   inner join (select distinct register_based_id, base_month from t_temp_union_pool) p on m.register_based_id = p.register_based_id
+--   where r.decision_engine_success_date is not null
+--     and to_number(to_char(r.decision_engine_success_date, 'yyyymm')) between
+--         to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -24), 'yyyymm'))
+--         and to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -1), 'yyyymm'))
+-- )
+
+-- select
+--   register_based_id,
+--   base_month,
+--   count(*) as req_cnt_w_2y,
+--   count(case when request_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -12)
+--     then 1 end)                                                                  as req_cnt_w_1y
+-- from request_raw
+-- group by register_based_id, base_month
+-- order by register_based_id;
+
+-- create table t_user_score_all_limit_usage_temp as
+-- with credit_monthly as (
+--   select
+--     p.register_based_id,
+--     p.base_month,
+--     c.credit_id,
+--     to_char(cch.created_date, 'yyyymm')                                                     as year_month,
+--     max(cch.credit_limit) keep (dense_rank last order by cch.created_date)                  as credit_limit,
+--     coalesce(max(cch.balance) keep (dense_rank last order by cch.created_date), 0)          as balance
+--   from toki.credit_credit_history cch
+--   inner join toki.credit_credit c on cch.credit_id = c.credit_id
+--   inner join t_temp_user_map m on c.user_id = m.user_id
+--   inner join (select distinct register_based_id, base_month from t_temp_union_pool) p on m.register_based_id = p.register_based_id
+--   where cch.created_date is not null
+--     and to_number(to_char(cch.created_date, 'yyyymm')) between
+--         to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -24), 'yyyymm'))
+--         and to_number(to_char(add_months(to_date(to_char(p.base_month), 'yyyymm'), -1), 'yyyymm'))
+--   group by p.register_based_id, p.base_month, c.credit_id, to_char(cch.created_date, 'yyyymm')
+-- ),
+-- credit_latest_month as (
+--   select register_based_id, base_month, credit_id, max(year_month) as latest_month
+--   from credit_monthly
+--   group by register_based_id, base_month, credit_id
+-- ),
+-- latest_credit as (
+--   select register_based_id, base_month, credit_id,
+--     row_number() over (
+--       partition by register_based_id, base_month
+--       order by latest_month desc, credit_id desc
+--     ) as rn
+--   from credit_latest_month
+-- ),
+-- credit_util as (
+--   select
+--     ms.register_based_id,
+--     ms.base_month,
+--     ms.year_month,
+--     ms.balance,
+--     ms.credit_limit as total_limit
+--   from latest_credit lc
+--   inner join credit_monthly ms
+--     on ms.register_based_id = lc.register_based_id and ms.base_month = lc.base_month and ms.credit_id = lc.credit_id
+--   where lc.rn = 1
+-- ),
+
+-- bnpl_loan_data as (
+--   select distinct
+--     a.account_id                                                              as user_id,
+--     a.transaction_id                                                          as loan_transaction_id,
+--     a.amount                                                                  as loan_amt,
+--     to_number(to_char(trunc(a.created_at), 'yyyymmdd'))                      as loan_date,
+--     a.status                                                                  as loan_status,
+--     to_number(to_char(trunc(c.transaction_date), 'yyyymmdd'))                as repayment_date
+--   from toki.dpr_tajet_bnpl_request a
+--   inner join toki.dpr_tajet_bnpl_invoice b
+--     on a.transaction_id = b.transaction_id and a.status not in ('CANCELLED')
+--   inner join toki.dpr_tajet_bnpl_repayment c
+--     on b.id_ = c.invoice_id and c.status = 'SUCCESS' and c.payment_type = 'REPAYMENT'
+-- ),
+-- bnpl_loan_summary as (
+--   select distinct
+--     user_id, loan_transaction_id, loan_date, loan_amt, loan_status,
+--     max(repayment_date) as loan_closed_date
+--   from bnpl_loan_data
+--   group by user_id, loan_transaction_id, loan_date, loan_amt, loan_status
+-- ),
+-- bnpl_account_summary as (
+--   select distinct
+--     a.bnpl_account_id,
+--     a.user_id,
+--     a.bnpl_limit,
+--     to_number(to_char(trunc(a.created_date), 'yyyymmdd'))                    as created_date,
+--     to_number(substr(to_char(to_number(to_char(trunc(a.created_date), 'yyyymmdd'))), 1, 6)) as month,
+--     coalesce(sum(distinct case
+--       when ls.loan_date <= to_number(to_char(trunc(a.created_date), 'yyyymmdd'))
+--        and (ls.loan_closed_date is null
+--             or ls.loan_closed_date > to_number(to_char(trunc(a.created_date), 'yyyymmdd')))
+--       then ls.loan_amt else 0
+--     end), 0) as balance
+--   from toki.bnpl_account_history a
+--   left join bnpl_loan_summary b
+--     on a.user_id = b.user_id
+--     and to_number(to_char(trunc(a.created_date), 'yyyymmdd')) = b.loan_date
+--     and a.created_by_action = 'loan'
+--   left join bnpl_loan_summary ls on a.user_id = ls.user_id
+--   where a.product = 'DEFAULT'
+--   group by a.bnpl_account_id, a.user_id, a.bnpl_limit, a.created_by_action,
+--            to_number(to_char(trunc(a.created_date), 'yyyymmdd')),
+--            b.loan_amt, b.loan_status, b.loan_closed_date
+-- ),
+-- bnpl_monthly_values as (
+--   select
+--     bnpl_account_id, user_id, month, bnpl_limit as latest_bnpl_limit, balance as latest_balance,
+--     row_number() over (partition by bnpl_account_id, user_id, month order by created_date desc) as rn
+--   from bnpl_account_summary
+-- ),
+-- bnpl_monthly_filtered as (
+--   select bnpl_account_id, user_id, month, latest_bnpl_limit, latest_balance
+--   from bnpl_monthly_values where rn = 1
+-- ),
+-- bnpl_user_month_range as (
+--   select bnpl_account_id, user_id, min(month) as min_month, max(month) as max_month
+--   from bnpl_monthly_filtered
+--   group by bnpl_account_id, user_id
+-- ),
+-- bnpl_all_months as (
+--   select
+--     umr.bnpl_account_id,
+--     umr.user_id,
+--     to_number(to_char(add_months(to_date(to_char(umr.min_month), 'yyyymm'), level - 1), 'yyyymm')) as month
+--   from bnpl_user_month_range umr
+--   connect by level <= months_between(
+--                to_date(to_char(umr.max_month), 'yyyymm'),
+--                to_date(to_char(umr.min_month), 'yyyymm')) + 1
+--     and prior bnpl_account_id = bnpl_account_id
+--     and prior user_id         = user_id
+--     and prior sys_guid()      is not null
+-- ),
+-- bnpl_account_result as (
+--   select
+--     am.bnpl_account_id,
+--     am.user_id,
+--     am.month,
+--     coalesce(mf.latest_bnpl_limit,
+--       last_value(mf.latest_bnpl_limit ignore nulls) over (
+--         partition by am.bnpl_account_id, am.user_id
+--         order by am.month
+--         rows between unbounded preceding and current row)) as latest_bnpl_limit,
+--     coalesce(mf.latest_balance,
+--       last_value(mf.latest_balance ignore nulls) over (
+--         partition by am.bnpl_account_id, am.user_id
+--         order by am.month
+--         rows between unbounded preceding and current row)) as latest_balance
+--   from bnpl_all_months am
+--   left join bnpl_monthly_filtered mf
+--     on am.bnpl_account_id = mf.bnpl_account_id
+--     and am.user_id        = mf.user_id
+--     and am.month          = mf.month
+-- ),
+-- bnpl_util as (
+--   select
+--     a.register_based_id,
+--     a.base_month,
+--     to_char(b.month, 'FM000000') as year_month,
+--     sum(b.latest_balance)        as balance,
+--     sum(b.latest_bnpl_limit)     as total_limit
+--   from (select distinct register_based_id, base_month from t_temp_union_pool) a
+--   inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+--   inner join bnpl_account_result b on m.user_id = b.user_id
+--     and b.month between
+--         to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -24), 'yyyymm'))
+--         and to_number(to_char(add_months(to_date(to_char(a.base_month), 'yyyymm'), -1), 'yyyymm'))
+--   group by a.register_based_id, a.base_month, b.month
+-- ),
+
+-- all_raw as (
+--   select register_based_id, base_month, year_month, balance, total_limit from credit_util
+--   union all
+--   select register_based_id, base_month, year_month, balance, total_limit from bnpl_util
+-- ),
+-- monthly_combined as (
+--   select
+--     register_based_id,
+--     base_month,
+--     year_month,
+--     case when sum(total_limit) > 0 then sum(balance) / sum(total_limit) else 0 end as util_ratio
+--   from all_raw
+--   group by register_based_id, base_month, year_month
+-- )
+
+-- select
+--   register_based_id,
+--   base_month,
+
+--   round(max(util_ratio), 2)                                                        as max_util_pct_w_2y,
+
+--   round(min(case when to_number(year_month) >=
+--     to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm'))
+--     then util_ratio end), 2)                                                       as min_util_pct_w_6m,
+
+--   round(max(case when to_number(year_month) >=
+--     to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -3), 'yyyymm'))
+--     then util_ratio end), 2)                                                       as max_util_pct_w_3m,
+
+--   round(max(util_ratio) keep (dense_rank last order by year_month), 2)             as latest_util_pct
+
+-- from monthly_combined
+-- group by register_based_id, base_month
+-- order by register_based_id;
+
+-- create table t_user_score_bnpl_repayment_temp as 
+-- with user_pool as (
+--     select distinct m.user_id, a.register_based_id, a.base_month
+--     from (select distinct register_based_id, base_month from t_temp_union_pool) a
+--     inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+--     where m.user_id is not null
+-- ),
+-- invoice_raw as (
+--   select distinct
+--     a.id_ as loan_request_id,
+--     to_number(to_char(trunc(a.created_at), 'yyyymmdd')) as loan_request_date,
+--     to_number(substr(to_char(trunc(a.created_at), 'yyyymmdd'), 1, 6)) as loan_request_month,
+--     a.amount as loan_request_amt,
+--     a.transaction_id as loan_transaction_id,
+--     a.account_id as user_id,
+--     a.bnpl_type as loan_type,
+--     a.method as loan_method,
+--     a.status as loan_status,
+--     b.id_ as invoice_id,
+--     b.amount as invoice_amt,
+--     to_number(to_char(trunc(b.payment_date), 'yyyymmdd')) as invoice_date,
+--     b.status as invoice_status,
+--     c.amount as repayment_amt,
+--     to_number(to_char(trunc(c.transaction_date), 'yyyymmdd')) as repayment_date,
+--     c.payment_type as repayment_type,
+--     c.status as repayment_status,
+--     b.payment_date as invoice_payment_date,
+--     c.transaction_date as repayment_transaction_date
+--   from toki.dpr_tajet_bnpl_request a
+--   left join toki.dpr_tajet_bnpl_invoice b on a.transaction_id = b.transaction_id and a.status not in ('CANCELLED', 'PENDING')
+--   left join toki.dpr_tajet_bnpl_repayment c on b.id_ = c.invoice_id and c.status in ('SUCCESS') and c.payment_type not in ('REFUND')
+-- ),
+-- repayment_aggregation as (
+--   select
+--     i.loan_request_id,
+--     i.invoice_id,
+--     i.loan_type,
+--     i.loan_request_amt,
+--     i.invoice_amt,
+--     m.base_month,
+--     sum(case when i.loan_type = 'UNSTRICTED_1' and i.repayment_date <= to_number(to_char(last_day(to_date(to_char(m.base_month), 'yyyymm')), 'yyyymmdd')) then i.repayment_amt else 0 end) as total_repayment_model_unrestricted,
+--     max(case when i.loan_type = 'STRICTED_4' and i.repayment_date <= to_number(to_char(last_day(to_date(to_char(m.base_month), 'yyyymm')), 'yyyymmdd')) then i.repayment_amt else 0 end) as repayment_amt_model_restricted,
+--     sum(case when i.loan_type = 'UNSTRICTED_1' and i.repayment_date < to_number(to_char(add_months(last_day(to_date(to_char(m.base_month), 'yyyymm')), -1), 'yyyymmdd')) then i.repayment_amt else 0 end) as total_repayment_before_base_unrestricted,
+--     max(case when i.loan_type = 'STRICTED_4' and i.repayment_date < to_number(to_char(add_months(last_day(to_date(to_char(m.base_month), 'yyyymm')), -1), 'yyyymmdd')) then i.repayment_amt else 0 end) as repayment_amt_restricted
+--   from invoice_raw i
+--   inner join user_pool m on i.user_id = m.user_id
+--   where to_number(substr(to_char(i.invoice_date), 1, 6))
+--     between to_number(to_char(add_months(to_date(to_char(m.base_month), 'yyyymm'), -24), 'yyyymm'))
+--         and to_number(to_char(add_months(last_day(to_date(to_char(m.base_month), 'yyyymm')), -1), 'yyyymm'))
+--   group by i.loan_request_id, i.invoice_id, i.loan_type, i.loan_request_amt, i.invoice_amt, m.base_month
+-- ),
+-- calculated_od as (
+--   select
+--     m.register_based_id,
+--     i.loan_request_id,
+--     i.invoice_id,
+--     i.loan_type,
+--     i.invoice_amt,
+--     i.invoice_date,
+--     i.loan_request_amt,
+--     i.repayment_type,
+--     i.repayment_transaction_date,
+--     i.invoice_payment_date,
+--     m.base_month,
+--     r.total_repayment_before_base_unrestricted,
+--     r.repayment_amt_restricted,
+--     case
+--       when to_number(substr(to_char(i.invoice_date), 1, 6)) between
+--           to_number(to_char(add_months(to_date(to_char(m.base_month), 'yyyymm'), -24), 'yyyymm'))
+--           and m.base_month
+--       then
+--         case
+--           when i.repayment_type in ('REPAYMENT')
+--             and (case
+--               when i.loan_type = 'UNSTRICTED_1' and r.total_repayment_model_unrestricted >= i.loan_request_amt then 1
+--               when i.loan_type = 'STRICTED_4' and r.repayment_amt_model_restricted >= i.invoice_amt then 1
+--               else 0
+--             end) = 1
+--             and i.repayment_transaction_date is not null
+--             and i.repayment_transaction_date <= last_day(to_date(to_char(m.base_month), 'yyyymm'))
+--             then trunc(i.repayment_transaction_date) - trunc(i.invoice_payment_date)
+--           when i.repayment_type in ('REPAYMENT')
+--             and (case
+--               when i.loan_type = 'UNSTRICTED_1' and r.total_repayment_model_unrestricted >= i.loan_request_amt then 1
+--               when i.loan_type = 'STRICTED_4' and r.repayment_amt_model_restricted >= i.invoice_amt then 1
+--               else 0
+--             end) = 0
+--             and i.repayment_transaction_date is not null
+--             then last_day(to_date(to_char(m.base_month), 'yyyymm')) - trunc(i.invoice_payment_date)
+--           when i.repayment_type is null
+--             then last_day(to_date(to_char(m.base_month), 'yyyymm')) - trunc(i.invoice_payment_date)
+--           else 0
+--         end
+--       else null
+--     end as od
+--   from invoice_raw i
+--   inner join user_pool m on i.user_id = m.user_id
+--   left join repayment_aggregation r on i.loan_request_id = r.loan_request_id and i.invoice_id = r.invoice_id and m.base_month = r.base_month
+--   where to_number(substr(to_char(i.invoice_date), 1, 6))
+--     between to_number(to_char(add_months(to_date(to_char(m.base_month), 'yyyymm'), -24), 'yyyymm'))
+--         and to_number(to_char(add_months(last_day(to_date(to_char(m.base_month), 'yyyymm')), -1), 'yyyymm'))
+-- )
+
+-- select distinct
+--   register_based_id,
+--   base_month,
+
+--   sum(case when od > 0 and repayment_type = 'REPAYMENT' then invoice_amt else 0 end) as od_inv_amt_w_2y,
+--   sum(case when od between 16 and 30 and repayment_type = 'REPAYMENT' then invoice_amt else 0 end) as od_30_inv_amt_w_2y,
+--   sum(case when od between 31 and 60 and repayment_type = 'REPAYMENT' then invoice_amt else 0 end) as od_60_inv_amt_w_2y,
+--   sum(case when od between 91 and 180 and repayment_type = 'REPAYMENT' then invoice_amt else 0 end) as od_180_inv_amt_w_2y,
+--   max(od) as max_od_w_2y,
+--   sum(od) as sum_od_w_2y,
+
+--   sum(case when od > 0 and repayment_type = 'REPAYMENT' and to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -12), 'yyyymm')) then invoice_amt else 0 end) as od_inv_amt_w_1y,
+--   sum(case when od between 16 and 30 and repayment_type = 'REPAYMENT' and to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -12), 'yyyymm')) then invoice_amt else 0 end) as od_30_inv_amt_w_1y,
+
+--   sum(case when od > 0 and repayment_type = 'REPAYMENT' and to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_inv_amt_w_6m,
+--   sum(case when od between 1 and 15 and repayment_type = 'REPAYMENT' and to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_15_inv_amt_w_6m,
+--   count(distinct case when od between 16 and 30 and repayment_type = 'REPAYMENT' and to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_id end) as od_30_inv_cnt_w_6m,
+--   sum(case when od between 16 and 30 and repayment_type = 'REPAYMENT' and to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_30_inv_amt_w_6m,
+--   sum(case when od between 61 and 90 and repayment_type = 'REPAYMENT' and to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_90_inv_amt_w_6m,
+--   max(case when to_number(substr(to_char(invoice_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then od end) as max_od_w_6m
+
+-- from calculated_od
+-- group by register_based_id, base_month;
+
+-- create table t_user_score_credit_repayment_temp as 
+-- with tmp_credit_invoice as (
+--   select
+--     b.register_based_id,
+--     b.base_month,
+--     i.invoice_id,
+--     i.invoice_type,
+--     i.principal_amt     as invoice_amt,
+--     i.target_month_date as invoice_month,
+--     i.fully_paid_date,
+--     i.due_date,
+--     case
+--       when trunc(i.due_date, 'MM') between add_months(to_date(to_char(b.base_month), 'yyyymm'), -24)
+--         and add_months(to_date(to_char(b.base_month), 'yyyymm'), -1)
+--       then
+--         case
+--           when i.fully_paid_date is not null
+--             and trunc(i.fully_paid_date, 'MM') <= to_date(to_char(b.base_month), 'yyyymm')
+--             then case when trunc(i.fully_paid_date) - trunc(i.due_date) >= 0
+--                       then trunc(i.fully_paid_date) - trunc(i.due_date) else 0 end
+--           else case when to_date(to_char(b.base_month), 'yyyymm') - trunc(i.due_date) >= 0
+--                     then to_date(to_char(b.base_month), 'yyyymm') - trunc(i.due_date) else 0 end
+--         end
+--       else null
+--     end as od
+--   from toki.credit_invoice i
+--   inner join toki.credit_credit cc on i.credit_id = cc.credit_id   
+--   inner join t_temp_user_map m on cc.user_id = m.user_id
+--   inner join (select distinct register_based_id, base_month from t_temp_union_pool) b on m.register_based_id = b.register_based_id
+--     and trunc(i.due_date, 'MM') between add_months(to_date(to_char(b.base_month), 'yyyymm'), -24)
+--       and add_months(to_date(to_char(b.base_month), 'yyyymm'), -1)
+--       and i.principal_amt > 0
+--     --and i.invoice_type = 'MONTHLY'
+-- )
+
+-- select distinct
+--   register_based_id,
+--   base_month,
+
+--   sum(case when od > 0 and invoice_type = 'MONTHLY' then invoice_amt else 0 end) as od_inv_amt_w_2y,
+--   sum(case when od between 16 and 30 and invoice_type = 'MONTHLY' then invoice_amt else 0 end) as od_30_inv_amt_w_2y,
+--   sum(case when od between 31 and 60 and invoice_type = 'MONTHLY' then invoice_amt else 0 end) as od_60_inv_amt_w_2y,
+--   sum(case when od between 91 and 180 and invoice_type = 'MONTHLY' then invoice_amt else 0 end) as od_180_inv_amt_w_2y,
+--   sum(case when trunc(fully_paid_date, 'MM') <= to_date(to_char(base_month), 'yyyymm') and invoice_type = 'INSTANT' then invoice_amt else 0 end) as instant_inv_amt_w_2y,
+--   max(od) as max_od_w_2y,
+--   sum(od) as sum_od_w_2y,
+
+--   sum(case when od > 0 and invoice_type = 'MONTHLY' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -12) then invoice_amt else 0 end) as od_inv_amt_w_1y,
+--   sum(case when od between 16 and 30 and invoice_type = 'MONTHLY' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -12) then invoice_amt else 0 end) as od_30_inv_amt_w_1y,
+--   sum(case when od > 0 and invoice_type = 'MONTHLY' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -6) then invoice_amt else 0 end) as od_inv_amt_w_6m,
+--   sum(case when od between 1 and 15 and invoice_type = 'MONTHLY' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -6) then invoice_amt else 0 end) as od_15_inv_amt_w_6m,
+--   count(distinct case when od between 16 and 30 and invoice_type = 'MONTHLY' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -6) then invoice_id end) as od_30_inv_cnt_w_6m,
+--   sum(case when od between 16 and 30 and invoice_type = 'MONTHLY' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -6) then invoice_amt else 0 end) as od_30_inv_amt_w_6m,
+--   sum(case when od between 61 and 90 and invoice_type = 'MONTHLY' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -6) then invoice_amt else 0 end) as od_90_inv_amt_w_6m,
+--   count(distinct case when trunc(fully_paid_date, 'MM') <= to_date(to_char(base_month), 'yyyymm') and invoice_type = 'INSTANT' and trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -6) then invoice_id end) as instant_inv_cnt_w_6m,
+--   max(case when trunc(due_date, 'MM') >= add_months(to_date(to_char(base_month), 'yyyymm'), -6) then od end) as max_od_w_6m
+
+-- from tmp_credit_invoice
+-- group by register_based_id, base_month;
+
+-- create table t_user_score_lease_repayment_temp as
+-- with tmp_handset_invoice as (
+--     select 
+--         b.loan_id,
+--         a.id as invoice_id,
+--         b.id as loan_invoice_id,
+--         a.invoice_type,
+--         a.principal_amt,
+--         to_date(a.due_date, 'dd-mon-yy') as due_date
+--     from toki.handset_invoice a
+--     left join toki.handset_loan_invoice b on a.id = b.invoice_id
+-- ),
+-- tmp_handset_repayment as (
+--     select 
+--         loan_id,
+--         loan_invoice_id,
+--         max(createdat) as createdat
+--     from (
+--         select 
+--             loan_id,
+--             loan_invoice_id,
+--             to_date(created_date, 'dd-mon-yy') as createdat
+--         from toki.handset_loan_repayment
+--     )
+--     group by loan_id, loan_invoice_id
+-- ),
+-- handset_combined as (
+--     select distinct
+--         d.register_based_id,
+--         d.base_month,
+--         a.loan_id,
+--         to_number(to_char(trunc(c.loan_activated_date), 'yyyymmdd')) as loan_activated_date,
+--         a.invoice_id,
+--         to_number(a.principal_amt) as invoice_amt,
+--         a.invoice_type,
+--         to_number(to_char(trunc(rep.createdat), 'yyyymmdd')) as paid_date,
+--         to_number(to_char(trunc(a.due_date), 'yyyymmdd')) as due_date,
+--         case
+--             when trunc(a.due_date, 'MM') between add_months(to_date(to_char(d.base_month), 'yyyymm'), -24)
+--         and add_months(to_date(to_char(d.base_month), 'yyyymm'), -1)
+--             then
+--                 case
+--                     when rep.createdat is not null
+--                         and trunc(rep.createdat, 'MM') <= to_date(to_char(d.base_month), 'yyyymm')
+--                     then trunc(rep.createdat) - trunc(a.due_date)
+--                     else to_date(to_char(d.base_month), 'yyyymm') - trunc(a.due_date)
+--                 end
+--             else null
+--         end as od
+--     from tmp_handset_invoice a
+--     left join tmp_handset_repayment rep on a.loan_id = rep.loan_id and a.loan_invoice_id = rep.loan_invoice_id
+--     inner join toki.handset_orders b on to_number(a.loan_id) = b.loanid  --sync n zogsson tul orluulah shaardlagtai
+--     inner join toki.handset_loan c on a.loan_id = c.id
+--     inner join t_temp_user_map m on b.accountid = m.user_id
+--     inner join (select distinct register_based_id, base_month from t_temp_union_pool) d on m.register_based_id = d.register_based_id
+--         and trunc(a.due_date, 'MM') between add_months(to_date(to_char(d.base_month), 'yyyymm'), -24)
+--         and add_months(to_date(to_char(d.base_month), 'yyyymm'), -1)
+--     --where a.invoice_type = 'SCHEDULED' 
+--     where c.is_staff_deal = 0
+--     and a.principal_amt > 0
+-- )
+
+-- select distinct
+--   register_based_id,
+--   base_month,
+
+
+--   sum(case when od > 0 and invoice_type = 'SCHEDULED' then invoice_amt else 0 end) as od_inv_amt_w_2y,
+--   sum(case when od between 16 and 30 and invoice_type = 'SCHEDULED' then invoice_amt else 0 end) as od_30_inv_amt_w_2y,
+--   sum(case when od between 31 and 60 and invoice_type = 'SCHEDULED' then invoice_amt else 0 end) as od_60_inv_amt_w_2y,
+--   sum(case when od between 91 and 180 and invoice_type = 'SCHEDULED' then invoice_amt else 0 end) as od_180_inv_amt_w_2y,
+--   sum(case when to_number(substr(to_char(paid_date), 1, 6)) <= base_month and invoice_type = 'INSTANT' then invoice_amt else 0 end) as instant_inv_amt_w_2y,
+--   max(od) as max_od_w_2y,
+--   sum(od) as sum_od_w_2y,
+
+--   sum(case when od > 0 and invoice_type = 'SCHEDULED' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -12), 'yyyymm')) then invoice_amt else 0 end) as od_inv_amt_w_1y,
+--   sum(case when od between 16 and 30 and invoice_type = 'SCHEDULED' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -12), 'yyyymm')) then invoice_amt else 0 end) as od_30_inv_amt_w_1y,
+
+--   sum(case when od > 0 and invoice_type = 'SCHEDULED' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_inv_amt_w_6m,
+--   sum(case when od between 1 and 15 and invoice_type = 'SCHEDULED' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_15_inv_amt_w_6m,
+--   count(distinct case when od between 16 and 30 and invoice_type = 'SCHEDULED' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_id end) as od_30_inv_cnt_w_6m,
+--   sum(case when od between 16 and 30 and invoice_type = 'SCHEDULED' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_30_inv_amt_w_6m,
+--   sum(case when od between 61 and 90 and invoice_type = 'SCHEDULED' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_amt else 0 end) as od_90_inv_amt_w_6m,
+--   count(distinct case when to_number(substr(to_char(paid_date), 1, 6)) <= base_month and invoice_type = 'INSTANT' and to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then invoice_id end) as instant_inv_cnt_w_6m,
+--   max(case when to_number(substr(to_char(due_date), 1, 6)) >= to_number(to_char(add_months(to_date(to_char(base_month), 'yyyymm'), -6), 'yyyymm')) then od end) as max_od_w_6m
+
+-- from handset_combined
+-- group by register_based_id, base_month;
+
+-- create table t_user_score_credit_usage_temp as 
+-- with base_data as (
+--   select
+--     t.register_based_id,
+--     t.base_month,
+--     lr.merchant_name,
+--     lr.product_name,
+--     lr.product_price,
+--     lr.created_date,
+--     trunc(lr.created_date) as usage_date
+
+--   from toki.credit_loan_request lr
+--   inner join toki.credit_credit cc on lr.credit_id = cc.credit_id
+--   inner join t_temp_user_map m on cc.user_id = m.user_id
+--   inner join (select distinct register_based_id, base_month from t_temp_union_pool) t on m.register_based_id = t.register_based_id
+--   and trunc(lr.created_date, 'MM') between add_months(to_date(to_char(t.base_month), 'yyyymm'), -24)
+--   and add_months(to_date(to_char(t.base_month), 'yyyymm'), -1)
+--   and lr.loan_type = 'PURCHASE' and lr.request_status = 'SUCCESS'
+-- ),
+-- daily_usage as (
+--   select
+--     register_based_id,
+--     base_month,
+--     usage_date,
+--     usage_date - row_number() over (partition by register_based_id, base_month order by usage_date) as island_id
+--   from (
+--     select distinct register_based_id, base_month, usage_date
+--     from base_data
+--   )
+-- )
+--   select
+--     register_based_id,
+--     base_month,
+
+--     count(*)                                                                                 as credit_usage_cnt_w_2y,
+--     sum(product_price)                                                                       as credit_usage_amt_w_2y,
+--     sum(case when usage_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -12) then product_price end)                 as credit_usage_amt_w_1y,
+--     sum(case when usage_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -3) then product_price end)                 as credit_usage_amt_w_3m,
+--     to_date(to_char(base_month), 'yyyymm') - max(trunc(created_date))                                                                 as days_since_last_credit_usage
+
+--   from base_data
+--   group by register_based_id, base_month;
+
+-- create table t_user_score_lease_usage_temp as
+-- with raw_data as (
+-- select
+--   accountid as userid,
+--   json_value(products,  '$[0].modelName') as model_name,
+--   json_value(products,  '$[0].type') as product_type,
+--   to_number(loanamount) as loanamount,
+--   to_number(to_char(trunc(to_date(substr(createdat, 1, 10), 'yyyy-mm-dd')), 'yyyymmdd')) as createdat
+-- from (
+--   select * from toki.handset_orders
+--   where orderstatus not in ('PENDING', 'CANCELLED')
+-- )
+
+-- union all
+
+-- select
+--   json_value(customer, '$.accountId') as userid,
+--   json_value(products,  '$[0].modelName') as model_name,
+--   json_value(products,  '$[0].inventoryType') as product_type,
+--   to_number(totalprice) as loanamount,
+--   to_number(to_char(trunc(createdat), 'yyyymmdd')) as createdat
+-- from (
+--   select * from toki.marketplace_handset_orders
+--   where orderstatus not in ('PENDING', 'CANCELLED')
+-- )
+-- ),
+-- base_data as (
+--   select
+--     t.register_based_id,
+--     t.base_month,
+--     r.model_name,
+--     r.product_type,
+--     r.loanamount,
+--     r.createdat,
+--     to_date(to_char(r.createdat), 'yyyymmdd') as usage_date,
+--     case
+--       when regexp_like(r.model_name, 'iphone',                                        'i') then 'phone_iphone'
+--       when regexp_like(r.model_name, 'apple.+watch|apple watch',                      'i') then 'watch_apple'
+--       when regexp_like(r.model_name, 'airpod|magsafe',                                'i') then 'accessory_apple'
+--       when regexp_like(r.model_name, '(samsung|galaxy).*(watch|band)',                'i') then 'watch_samsung'
+--       when regexp_like(r.model_name, 'galaxy.*buds|samsung.*(adapter|headphone)|akg', 'i') then 'accessory_samsung'
+--       when regexp_like(r.model_name, 'samsung|galaxy',                                'i') then 'phone_samsung'
+--       when regexp_like(r.model_name, 'huawei.*(watch|band|fit)',                      'i') then 'watch_huawei'
+--       when regexp_like(r.model_name, 'huawei.*(free.?buds|freebuds)',                 'i') then 'accessory_huawei'
+--       when regexp_like(r.model_name, 'huawei',                                        'i') then 'phone_huawei'
+--       when regexp_like(r.model_name, 'zte',                                           'i') then 'phone_zte'
+--       when regexp_like(r.model_name, 'adapter',                                       'i') then 'accessory_adapter'
+--       else 'other'
+--     end as model_group
+
+--   from raw_data r
+--   inner join t_temp_user_map m on r.userid = m.user_id
+--   inner join (select distinct register_based_id, base_month from t_temp_union_pool) t on m.register_based_id = t.register_based_id
+--   and trunc(to_date(to_char(r.createdat), 'yyyymmdd'), 'MM') between add_months(to_date(to_char(t.base_month), 'yyyymm'), -24)
+--   and add_months(to_date(to_char(t.base_month), 'yyyymm'), -1)
+-- ),
+
+-- daily_usage as (
+--   select
+--     register_based_id,
+--     base_month,
+--     usage_date,
+--     usage_date - row_number() over (partition by register_based_id, base_month order by usage_date) as island_id
+--   from (
+--     select distinct register_based_id, base_month, usage_date
+--     from base_data
+--   )
+-- )
+--   select
+--     register_based_id,
+--     base_month,
+
+--     count(*)                                                                                 as lease_usage_cnt_w_2y,
+--     sum(loanamount)                                                                          as lease_usage_amt_w_2y,
+--     sum(case when usage_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -12) then loanamount end)                   as lease_usage_amt_w_1y,
+--     sum(case when usage_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -3) then loanamount end)                   as lease_usage_amt_w_3m,
+
+--     to_date(to_char(base_month), 'yyyymm') - max(usage_date)                                                                    as days_since_last_lease_usage
+
+--   from base_data
+--   group by register_based_id, base_month;
+
+-- create table t_user_score_age_temp as
+-- select
+--   register_based_id,
+--   base_month,
+--   floor(months_between(
+--     to_date(to_char(base_month, 'FM000000'), 'YYYYMM'),
+--     min(parsed_dob)
+--   ) / 12) as age
+-- from (
+--   select
+--     a.register_based_id,
+--     a.base_month,
+--     case
+--       when b.dob like '____-__-__'
+--         and to_number(substr(b.dob, 6, 2)) between 1 and 12
+--         and to_number(substr(b.dob, 9, 2)) between 1 and 31
+--         then to_date(b.dob, 'YYYY-MM-DD')
+--       when b.dob like '__/__/____'
+--         and to_number(substr(b.dob, 4, 2)) between 1 and 12
+--         and to_number(substr(b.dob, 1, 2)) between 1 and 31
+--         then to_date(b.dob, 'DD/MM/YYYY')
+--     end as parsed_dob
+--   from (select distinct register_based_id, base_month from t_temp_union_pool) a
+--   inner join t_temp_user_map m on a.register_based_id = m.register_based_id
+--   inner join toki.dpr_maat_customers b on m.user_id = b.identifier
+--   where b.dob is not null
+-- )
+-- group by register_based_id, base_month;
+
+-- create table t_user_score_bnpl_usage_temp as
+-- with merchant_raw as (
+--   select
+--     t.register_based_id,
+--     trunc(b.transaction_date) as usage_date,
+--     a.transaction_id,
+--     a.amount,
+--     c.merchant_name,
+--     t.base_month
+--   from toki.dpr_tajet_bnpl_request a
+--   left join toki.dpr_tajet_teller_transactions b on b.identifier = a.transaction_id
+--   left join t_merchant_lookup c on c.merchant_id = b.target_account_identifier
+--   inner join t_temp_user_map m on a.account_id = m.user_id
+--   inner join (select distinct register_based_id, base_month from t_temp_union_pool) t on m.register_based_id = t.register_based_id
+--     and trunc(b.transaction_date, 'MM') between add_months(to_date(to_char(t.base_month), 'yyyymm'), -24)
+--     and add_months(to_date(to_char(t.base_month), 'yyyymm'), -1)
+--   where status <> 'CANCELED'
+-- )
+--   select
+--     register_based_id,
+--     base_month,
+
+--     count(*)                                                                                 as bnpl_usage_cnt_w_2y,
+--     sum(amount)                                                                              as bnpl_usage_amt_w_2y,
+--     sum(case when usage_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -12) then amount end)                       as bnpl_usage_amt_w_1y,
+--     sum(case when usage_date >= add_months(to_date(to_char(base_month), 'yyyymm'), -3) then amount end)                       as bnpl_usage_amt_w_3m,
+
+--     to_date(to_char(base_month), 'yyyymm') - max(usage_date)                                                                          as days_since_last_bnpl_usage
+
+--   from merchant_raw
+--   group by register_based_id, base_month;
+
+-- create table t_user_score_feature_set_temp as
+-- select
+--   t.register_based_id,
+--   t.user_id,
+--   t.mob_group,
+--   t.base_month,
+--   t.mob,
+--   t.model_od,
+
+--   ag.age,
+
+--   g.sum_gaming_amt_w_6m,
+
+--   pk.sum_parking_amt_w_6m,
+
+--   sm.data_payment_count_sum_w3m,
+--   sm.transport_count_sum_w6m,
+
+--   sm.merchant_group_count_w_1m,
+
+--   co.is_own_car,
+
+--   txn.max_trans_cnt_w_6m,
+--   txn.std_trans_amt_w_6m,
+--   txn.sum_trans_amt_w_1m,
+--   txn.max_trans_amt_credit_w_6m,
+--   txn.std_trans_amt_credit_w_6m,
+--   txn.sum_trans_amt_card_w_1m,
+--   txn.std_trans_cnt_night_w_6m,
+--   txn.sum_trans_cnt_morning_w_6m,
+--   txn.sum_trans_cnt_non_credit_w_1m,
+--   txn.sum_trans_amt_non_credit_w_6m,
+--   txn.std_trans_amt_non_credit_w_3m,
+--   txn.distinct_transaction_months_w_6m,
+
+--   wlt.max_balance_w_6m,
+--   wlt.avg_min_balance_w_6m,
+--   wlt.max_max_balance_w_3m,
+--   wlt.avg_balance_w_1m,
+
+--   fr.avg_fire_model_cnt_w_6m,
+
+--   kyc.last_kyctype_true,
+
+--   mp.night_usage_count_std_w_6m,
+--   mp.morning_usage_count_sum_w_1m,
+--   mp.morning_usage_per_w_6m,
+--   mp.night_usage_month_w_6m,
+--   mp.mp_usage_count_sum_w_6m,
+--   mp.mp_usage_count_std_w_6m,
+
+--   case
+--     when nv.same_double = 1 or nv.double_double = 1 or nv.triple_start = 1 or nv.triple_end = 1
+--       or nv.valid_bronze = 1 or nv.premium_index = 1 or nv.gold_pre = 1 or nv.silver_pre = 1
+--       or nv.gold_e = 1 or nv.cons_gold = 1 or nv.sub_super_end = 1 or nv.super_ended = 1
+--     then 1 else 0
+--   end as is_number_valued,
+
+--   te.toki_tenure as dynamic_toki_tenure,
+--   te.sign_tenure as dynamic_sign_tenure,
+
+--   alu.max_util_pct_w_3m,
+--   alu.max_util_pct_w_2y,
+--   alu.latest_util_pct,
+--   alu.min_util_pct_w_6m,
+
+--   ar.req_cnt_w_2y,
+--   ar.req_cnt_w_1y,
+
+--   case
+--     when br.max_od_w_2y is null and cr.max_od_w_2y is null and lr.max_od_w_2y is null then null
+--     else greatest(nvl(br.max_od_w_2y, 0), nvl(cr.max_od_w_2y, 0), nvl(lr.max_od_w_2y, 0))
+--   end as loan_max_od_w_2y,
+--   case
+--     when br.max_od_w_6m is null and cr.max_od_w_6m is null and lr.max_od_w_6m is null then null
+--     else greatest(nvl(br.max_od_w_6m, 0), nvl(cr.max_od_w_6m, 0), nvl(lr.max_od_w_6m, 0))
+--   end as loan_max_od_w_6m,
+--   case
+--     when br.sum_od_w_2y is null and cr.sum_od_w_2y is null and lr.sum_od_w_2y is null then null
+--     else nvl(br.sum_od_w_2y, 0) + nvl(cr.sum_od_w_2y, 0) + nvl(lr.sum_od_w_2y, 0)
+--   end as loan_sum_od_w_2y,
+--   case
+--     when bu.bnpl_usage_amt_w_1y is null and cu.credit_usage_amt_w_1y is null and lu.lease_usage_amt_w_1y is null then null
+--     else nvl(bu.bnpl_usage_amt_w_1y, 0) + nvl(cu.credit_usage_amt_w_1y, 0) + nvl(lu.lease_usage_amt_w_1y, 0)
+--   end as loan_usage_amt_w_1y,
+--   case
+--     when br.od_90_inv_amt_w_6m is null and cr.od_90_inv_amt_w_6m is null and lr.od_90_inv_amt_w_6m is null then null
+--     else nvl(br.od_90_inv_amt_w_6m, 0) + nvl(cr.od_90_inv_amt_w_6m, 0) + nvl(lr.od_90_inv_amt_w_6m, 0)
+--   end as loan_od_90_inv_amt_w_6m,
+--   case
+--     when br.od_inv_amt_w_6m is null and cr.od_inv_amt_w_6m is null and lr.od_inv_amt_w_6m is null then null
+--     else nvl(br.od_inv_amt_w_6m, 0) + nvl(cr.od_inv_amt_w_6m, 0) + nvl(lr.od_inv_amt_w_6m, 0)
+--   end as loan_od_inv_amt_w_6m,
+--   case
+--     when bu.days_since_last_bnpl_usage is null and cu.days_since_last_credit_usage is null and lu.days_since_last_lease_usage is null then null
+--     else least(nvl(bu.days_since_last_bnpl_usage, 9999), nvl(cu.days_since_last_credit_usage, 9999), nvl(lu.days_since_last_lease_usage, 9999))
+--   end as days_since_last_loan_usage,
+--   case
+--     when br.od_180_inv_amt_w_2y is null and cr.od_180_inv_amt_w_2y is null and lr.od_180_inv_amt_w_2y is null then null
+--     else nvl(br.od_180_inv_amt_w_2y, 0) + nvl(cr.od_180_inv_amt_w_2y, 0) + nvl(lr.od_180_inv_amt_w_2y, 0)
+--   end as loan_od_180_inv_amt_w_2y,
+--   case
+--     when br.od_15_inv_amt_w_6m is null and cr.od_15_inv_amt_w_6m is null and lr.od_15_inv_amt_w_6m is null then null
+--     else nvl(br.od_15_inv_amt_w_6m, 0) + nvl(cr.od_15_inv_amt_w_6m, 0) + nvl(lr.od_15_inv_amt_w_6m, 0)
+--   end as loan_od_15_inv_amt_w_6m,
+--   case
+--     when bu.bnpl_usage_amt_w_2y is null and cu.credit_usage_amt_w_2y is null and lu.lease_usage_amt_w_2y is null then null
+--     else nvl(bu.bnpl_usage_amt_w_2y, 0) + nvl(cu.credit_usage_amt_w_2y, 0) + nvl(lu.lease_usage_amt_w_2y, 0)
+--   end as loan_usage_amt_w_2y,
+--   case
+--     when br.od_30_inv_amt_w_6m is null and cr.od_30_inv_amt_w_6m is null and lr.od_30_inv_amt_w_6m is null then null
+--     else nvl(br.od_30_inv_amt_w_6m, 0) + nvl(cr.od_30_inv_amt_w_6m, 0) + nvl(lr.od_30_inv_amt_w_6m, 0)
+--   end as loan_od_30_inv_amt_w_6m,
+--   case
+--     when cr.instant_inv_cnt_w_6m is null and lr.instant_inv_cnt_w_6m is null then null
+--     else nvl(cr.instant_inv_cnt_w_6m, 0) + nvl(lr.instant_inv_cnt_w_6m, 0)
+--   end as loan_instant_inv_cnt_w_6m,
+--   case
+--     when bu.bnpl_usage_amt_w_3m is null and cu.credit_usage_amt_w_3m is null and lu.lease_usage_amt_w_3m is null then null
+--     else nvl(bu.bnpl_usage_amt_w_3m, 0) + nvl(cu.credit_usage_amt_w_3m, 0) + nvl(lu.lease_usage_amt_w_3m, 0)
+--   end as loan_usage_amt_w_3m,
+--   case
+--     when br.od_inv_amt_w_1y is null and cr.od_inv_amt_w_1y is null and lr.od_inv_amt_w_1y is null then null
+--     else nvl(br.od_inv_amt_w_1y, 0) + nvl(cr.od_inv_amt_w_1y, 0) + nvl(lr.od_inv_amt_w_1y, 0)
+--   end as loan_od_inv_amt_w_1y,
+--   case
+--     when br.od_30_inv_cnt_w_6m is null and cr.od_30_inv_cnt_w_6m is null and lr.od_30_inv_cnt_w_6m is null then null
+--     else nvl(br.od_30_inv_cnt_w_6m, 0) + nvl(cr.od_30_inv_cnt_w_6m, 0) + nvl(lr.od_30_inv_cnt_w_6m, 0)
+--   end as loan_od_30_inv_cnt_w_6m,
+--   case
+--     when br.od_30_inv_amt_w_1y is null and cr.od_30_inv_amt_w_1y is null and lr.od_30_inv_amt_w_1y is null then null
+--     else nvl(br.od_30_inv_amt_w_1y, 0) + nvl(cr.od_30_inv_amt_w_1y, 0) + nvl(lr.od_30_inv_amt_w_1y, 0)
+--   end as loan_od_30_inv_amt_w_1y,
+--   case
+--     when br.od_inv_amt_w_2y is null and cr.od_inv_amt_w_2y is null and lr.od_inv_amt_w_2y is null then null
+--     else nvl(br.od_inv_amt_w_2y, 0) + nvl(cr.od_inv_amt_w_2y, 0) + nvl(lr.od_inv_amt_w_2y, 0)
+--   end as loan_od_inv_amt_w_2y,
+--   case
+--     when br.od_30_inv_amt_w_2y is null and cr.od_30_inv_amt_w_2y is null and lr.od_30_inv_amt_w_2y is null then null
+--     else nvl(br.od_30_inv_amt_w_2y, 0) + nvl(cr.od_30_inv_amt_w_2y, 0) + nvl(lr.od_30_inv_amt_w_2y, 0)
+--   end as loan_od_30_inv_amt_w_2y,
+--   case
+--     when bu.bnpl_usage_cnt_w_2y is null and cu.credit_usage_cnt_w_2y is null and lu.lease_usage_cnt_w_2y is null then null
+--     else nvl(bu.bnpl_usage_cnt_w_2y, 0) + nvl(cu.credit_usage_cnt_w_2y, 0) + nvl(lu.lease_usage_cnt_w_2y, 0)
+--   end as loan_usage_cnt_w_2y,
+--   case
+--     when br.od_60_inv_amt_w_2y is null and cr.od_60_inv_amt_w_2y is null and lr.od_60_inv_amt_w_2y is null then null
+--     else nvl(br.od_60_inv_amt_w_2y, 0) + nvl(cr.od_60_inv_amt_w_2y, 0) + nvl(lr.od_60_inv_amt_w_2y, 0)
+--   end as loan_od_60_inv_amt_w_2y,
+--   case
+--     when cr.instant_inv_amt_w_2y is null and lr.instant_inv_amt_w_2y is null then null
+--     else nvl(cr.instant_inv_amt_w_2y, 0) + nvl(lr.instant_inv_amt_w_2y, 0)
+--   end as loan_instant_inv_amt_w_2y
+
+-- from t_temp_union_pool t
+
+-- left join t_user_score_age_temp               ag  on t.register_based_id = ag.register_based_id  and t.base_month = ag.base_month
+-- left join t_user_score_gaming_temp1            g   on t.register_based_id = g.register_based_id   and t.base_month = g.base_month
+-- left join t_user_score_parking_temp           pk  on t.register_based_id = pk.register_based_id  and t.base_month = pk.base_month
+-- left join t_user_score_service_more_temp      sm  on t.register_based_id = sm.register_based_id  and t.base_month = sm.base_month
+-- left join t_user_score_car_ownership_temp     co  on t.register_based_id = co.register_based_id  and t.base_month = co.base_month
+-- left join t_user_score_transaction_temp       txn on t.register_based_id = txn.register_based_id and t.base_month = txn.base_month
+-- left join t_user_score_wallet_temp            wlt on t.register_based_id = wlt.register_based_id and t.base_month = wlt.base_month
+-- left join t_user_score_fire_temp              fr  on t.register_based_id = fr.register_based_id  and t.base_month = fr.base_month
+-- left join t_user_score_kyc_temp               kyc on t.register_based_id = kyc.register_based_id and t.base_month = kyc.base_month
+-- left join t_user_score_mp_usage_temp          mp  on t.register_based_id = mp.register_based_id  and t.base_month = mp.base_month
+-- left join t_user_score_number_value_temp      nv  on t.register_based_id = nv.register_based_id  and t.base_month = nv.base_month
+-- left join t_user_score_tenure_temp            te  on t.register_based_id = te.register_based_id  and t.base_month = te.base_month
+-- left join t_user_score_all_limit_usage_temp   alu on t.register_based_id = alu.register_based_id and t.base_month = alu.base_month
+-- left join t_user_score_all_request_temp       ar  on t.register_based_id = ar.register_based_id  and t.base_month = ar.base_month
+-- left join t_user_score_bnpl_repayment_temp    br  on t.register_based_id = br.register_based_id  and t.base_month = br.base_month
+-- left join t_user_score_bnpl_usage_temp        bu  on t.register_based_id = bu.register_based_id  and t.base_month = bu.base_month
+-- left join t_user_score_credit_repayment_temp  cr  on t.register_based_id = cr.register_based_id  and t.base_month = cr.base_month
+-- left join t_user_score_credit_usage_temp      cu  on t.register_based_id = cu.register_based_id  and t.base_month = cu.base_month
+-- left join t_user_score_lease_repayment_temp   lr  on t.register_based_id = lr.register_based_id  and t.base_month = lr.base_month
+-- left join t_user_score_lease_usage_temp       lu  on t.register_based_id = lu.register_based_id  and t.base_month = lu.base_month;
+
+-- drop table t_user_score_wallet_temp;
+-- drop table t_user_score_transaction_temp;
+-- drop table t_user_score_tenure_temp;
+-- drop table t_user_score_service_more_temp;
+-- drop table t_user_score_parking_temp;
+-- drop table t_user_score_number_value_temp;
+-- drop table t_user_score_mp_usage_temp;
+-- drop table t_user_score_kyc_temp;
+-- drop table t_user_score_gaming_temp;
+-- drop table t_user_score_fire_temp;
+-- drop table t_user_score_car_ownership_temp;
+-- drop table t_user_score_all_request_temp;
+-- drop table t_user_score_all_limit_usage_temp;
+-- drop table t_user_score_bnpl_repayment_temp;
+-- drop table t_user_score_credit_repayment_temp;
+-- drop table t_user_score_lease_repayment_temp;
+-- drop table t_user_score_credit_usage_temp;
+-- drop table t_user_score_lease_usage_temp;
+-- drop table t_user_score_age_temp;
+-- drop table t_user_score_bnpl_usage_temp;
