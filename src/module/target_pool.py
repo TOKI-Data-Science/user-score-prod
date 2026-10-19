@@ -3,11 +3,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.module.database import oracle_execute_script, oracle_export, oracle_import
+from src.module.database import oracle_execute_script_parallel, oracle_export, oracle_import
 from src.module.helper import logging_timer
 
 TARGET_POOL_SQL = Path(__file__).parent / 'queries' / 'target_pool.sql'
 TARGET_POOL_TABLE = 't_temp_union_pool'
+PANDAS_TASK = 'pandas_enrich'
 
 
 def mob_to_group(mob):
@@ -73,9 +74,28 @@ def enforce_non_downgrade(df, mob_col, key_col='register_based_id'):
 
 
 @logging_timer(entry=True, exit=True)
-def build_target_pool(report=None):
-    """Runs target_pool.sql, enriches the result in pandas, and writes it back to Oracle"""
-    oracle_execute_script(TARGET_POOL_SQL, report=report, step='build_target_pool')
+def build_target_pool(report=None, run_log=None):
+    """Runs target_pool.sql, enriches the result in pandas, and writes it back to Oracle.
+    The pandas part replaces t_temp_union_pool with a different layout, so it is logged as its own task
+    ('pandas_enrich'); if a restart finds it unfinished, t_temp_union_pool is rebuilt from the SQL first."""
+    step = 'build_target_pool'
+    pandas_done = run_log.task_done(step, PANDAS_TASK) if run_log else False
+    oracle_execute_script_parallel(
+        TARGET_POOL_SQL,
+        report=report,
+        step=step,
+        max_workers=1,
+        run_log=run_log,
+        rerun_tables=() if pandas_done else (TARGET_POOL_TABLE,),
+    )
+    if run_log:
+        with run_log.track_task(step, PANDAS_TASK):
+            return _enrich_target_pool()
+    return _enrich_target_pool()
+
+
+def _enrich_target_pool():
+    """pandas part of build_target_pool"""
 
     target = oracle_import(
         f'select user_id, register_based_id, base_month, product, mob, model_od from {TARGET_POOL_TABLE}'

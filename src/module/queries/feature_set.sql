@@ -739,7 +739,12 @@ with user_events as (
             else 'evening'
         end as time_of_day
     -- from toki.mongo_miniprogramuserlogs
-    from toki.mongo_daily_service_user_log
+    from (
+        select
+            userid,
+            to_date(substr(replace(createdat, 'T', ' '), 1, 19) default null on conversion error, 'yyyy-mm-dd hh24:mi:ss') as createdat
+        from toki.mongo_daily_service_user_log
+    )
     where createdat BETWEEN ADD_MONTHS(TRUNC(SYSDATE) - 1, -6) AND TRUNC(SYSDATE) - 1
 ),
 time_of_day_activity as (

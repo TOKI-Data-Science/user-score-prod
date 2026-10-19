@@ -3,7 +3,6 @@ from pathlib import Path
 
 from src.module.database import (
     describe_script,
-    oracle_execute_script,
     oracle_execute_script_parallel,
     oracle_table_exists,
 )
@@ -16,21 +15,20 @@ FEATURE_SET_TABLE = 't_user_score_feature_set_temp'
 
 
 @logging_timer(entry=True, exit=True)
-def build_feature_set(report=None):
-    """Runs feature_set.sql after verifying t_temp_union_pool exists"""
+def build_feature_set(report=None, run_log=None):
+    """Runs feature_set.sql after verifying t_temp_union_pool exists.
+    With a run_log, statements already finished in this run are skipped (restart)."""
     if not oracle_table_exists(TARGET_POOL_TABLE):
         raise RuntimeError(
             f'{TARGET_POOL_TABLE} does not exist; run build_target_pool() first'
         )
-    if settings.feature_workers > 1:
-        oracle_execute_script_parallel(
-            FEATURE_SET_SQL,
-            report=report,
-            step='build_feature_set',
-            max_workers=settings.feature_workers,
-        )
-    else:
-        oracle_execute_script(FEATURE_SET_SQL, report=report, step='build_feature_set')
+    oracle_execute_script_parallel(
+        FEATURE_SET_SQL,
+        report=report,
+        step='build_feature_set',
+        max_workers=max(1, settings.feature_workers),
+        run_log=run_log,
+    )
 
 
 def describe_feature_set():

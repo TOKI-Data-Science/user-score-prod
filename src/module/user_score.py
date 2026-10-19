@@ -15,7 +15,7 @@ USER_SCORE_TABLE = 't_user_score_result'
 
 
 @logging_timer(entry=True, exit=True)
-def build_user_score():
+def build_user_score(report=None, run_log=None):
     """Scores t_user_score_inactive_tag, snapshots the result by run month, and upserts it into t_user_score_result"""
     if not oracle_table_exists(INACTIVE_TAG_TABLE):
         raise RuntimeError(
@@ -24,6 +24,7 @@ def build_user_score():
     df_raw = oracle_import(f'select * from {INACTIVE_TAG_TABLE}')
     df_raw.columns = df_raw.columns.str.lower()
     result = score_and_reason(df_raw)
-    oracle_export(result, f'{USER_SCORE_TABLE}_{datetime.now():%Y%m}')
+    month = run_log.snapshot_suffix() if run_log else f'{datetime.now():%Y%m}'
+    oracle_export(result, f'{USER_SCORE_TABLE}_{month}')
     oracle_upsert_by_column(result, USER_SCORE_TABLE, 'base_month')
     return result

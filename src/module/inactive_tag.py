@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.module.database import (
-    oracle_execute_script,
+    oracle_execute_script_parallel,
     oracle_export,
     oracle_import,
     oracle_table_exists,
@@ -18,8 +18,9 @@ INACTIVE_TAG_TABLE = 't_user_score_inactive_tag'
 RAW_HISTORY_TABLE = 't_user_score_raw'
 
 @logging_timer(entry=True, exit=True)
-def build_inactive_tag(report=None):
-    """Runs inactive_tag.sql, snapshots the result by run month, and upserts it into t_user_score_raw"""
+def build_inactive_tag(report=None, run_log=None):
+    """Runs inactive_tag.sql, snapshots the result by run month, and upserts it into t_user_score_raw.
+    With a run_log, statements already finished in this run are skipped (restart)."""
     if not oracle_table_exists(TARGET_POOL_TABLE):
         raise RuntimeError(
             f'{TARGET_POOL_TABLE} does not exist; run build_target_pool() first'
@@ -28,11 +29,14 @@ def build_inactive_tag(report=None):
         raise RuntimeError(
             f'{FEATURE_SET_TABLE} does not exist; run build_feature_set() first'
         )
-    oracle_execute_script(INACTIVE_TAG_SQL, report=report, step='build_inactive_tag')
+    oracle_execute_script_parallel(
+        INACTIVE_TAG_SQL, report=report, step='build_inactive_tag', max_workers=1, run_log=run_log
+    )
 
     df = oracle_import(f'select * from {INACTIVE_TAG_TABLE}')
     df.columns = df.columns.str.lower()
     df = df.drop(columns=['register_based_id'], errors='ignore')
-    oracle_export(df, f'{INACTIVE_TAG_TABLE}_{datetime.now():%Y%m}')
+    month = run_log.snapshot_suffix() if run_log else f'{datetime.now():%Y%m}'
+    oracle_export(df, f'{INACTIVE_TAG_TABLE}_{month}')
     oracle_upsert_by_column(df, RAW_HISTORY_TABLE, 'base_month')
     return df

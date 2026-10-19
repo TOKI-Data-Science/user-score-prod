@@ -9,7 +9,7 @@ from loguru import logger
 from sqlalchemy import URL, create_engine, types
 from sqlalchemy.sql import text
 
-from src.module.helper import elapsed_time, logging_timer
+from src.module.helper import DeadlineExceeded, elapsed_time, logging_timer
 from src.module.settings import settings
 
 oracle_connection_url = URL.create(
@@ -76,10 +76,16 @@ def oracle_upsert_by_column(data_frame, table_name, key_column):
     if oracle_table_exists(table_name):
         keys = ', '.join(str(int(v)) for v in data_frame[key_column].unique())
         engine = create_engine(oracle_connection_url)
-        with engine.connect() as connection:
+        # delete + append share one transaction: a crash in between rolls back, so the month's history is never lost
+        with engine.begin() as connection:
             connection.execute(text(f'delete from {table_name} where {key_column} in ({keys})'))
-            connection.commit()
-        oracle_export(data_frame, table_name, if_exists='append')
+            data_frame.to_sql(
+                table_name.lower(),
+                con=connection,
+                if_exists='append',
+                index=False,
+                dtype=sql_col(data_frame),
+            )
     else:
         oracle_export(data_frame, table_name, if_exists='replace')
 
@@ -247,12 +253,13 @@ def describe_script(filepath, weights=None):
     return '\n'.join(lines)
 
 
-def _run_task(engine, task, report, step):
+def _run_task(engine, task, report, step, run_log=None):
     """Runs one statement on its own connection (one connection per thread)"""
     tracker = report.track_table(step, task['label']) if report else nullcontext()
+    logged = run_log.track_task(step, task['label']) if run_log else nullcontext()
     started = time.time()
     logger.log(settings.log_level, f"Starting '{task['label']}'")
-    with tracker, engine.connect() as connection:
+    with tracker, logged, engine.connect() as connection:
         table = task['table']
         if task['kind'] == 'create' and table:
             exists = connection.execute(
@@ -271,28 +278,43 @@ def _run_task(engine, task, report, step):
 
 
 @logging_timer()
-def oracle_execute_script_parallel(filepath, report=None, step=None, max_workers=3, weights=None):
+def oracle_execute_script_parallel(
+    filepath, report=None, step=None, max_workers=3, weights=None, run_log=None, rerun_tables=()
+):
     """Like oracle_execute_script, but runs statements that do not depend on each other at the same time.
     Dependencies come from parse_script. With a failure, no new statement is started, statements already
     running are allowed to finish (their tables stay in place), then the first error is raised.
     weights (task label -> estimated seconds) makes the longest chains start first.
+    With run_log (see run_log.py) every statement is logged, statements already finished in this run are
+    skipped (restart), and no new statement starts once the deadline has passed (DeadlineExceeded is
+    raised after the running ones finish). rerun_tables are rebuilt even if logged as done.
     """
     tasks = parse_script(filepath)
     by_index = {t['index']: t for t in tasks}
     _, _, rank = _schedule_info(tasks, weights)
     pending = set(by_index)
     done = set()
+    if run_log:
+        skipped = plan_skips(tasks, run_log.done_tasks(step), oracle_existing_tables(), set(rerun_tables))
+        for i in sorted(skipped):
+            logger.log(settings.log_level, f"Skipping '{by_index[i]['label']}' (already done in run {run_log.run_id})")
+        pending -= skipped
+        done |= skipped
     running = {}
     error = None
+    deadline = False
     engine = create_engine(oracle_connection_url, pool_size=max_workers, max_overflow=0)
     try:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             while pending or running:
-                if error is None:
+                if run_log and not deadline and run_log.deadline_passed():
+                    deadline = True
+                    logger.warning('Deadline reached: not starting new statements, waiting for running ones')
+                if error is None and not deadline:
                     ready = sorted((i for i in pending if by_index[i]['deps'] <= done), key=lambda i: (-rank[i], i))
                     for i in ready[: max_workers - len(running)]:
                         pending.discard(i)
-                        running[pool.submit(_run_task, engine, by_index[i], report, step)] = i
+                        running[pool.submit(_run_task, engine, by_index[i], report, step, run_log)] = i
                 if not running:
                     break
                 finished, _ = wait(running, return_when=FIRST_COMPLETED)
@@ -308,8 +330,36 @@ def oracle_execute_script_parallel(filepath, report=None, step=None, max_workers
         engine.dispose()
     if error:
         raise error
+    if deadline and pending:
+        raise DeadlineExceeded(f'{len(pending)} statements of {step} not started: deadline reached')
     if pending:
         raise RuntimeError(f'could not schedule: {[by_index[i]["label"] for i in sorted(pending)]}')
+
+
+def oracle_existing_tables():
+    """Lower-cased names of all tables in the connected Oracle schema"""
+    return set(oracle_import('select table_name from user_tables').iloc[:, 0].str.lower())
+
+
+def plan_skips(tasks, done_labels, existing_tables, rerun_tables=()):
+    """Indexes of tasks that a resumed run does not have to run again.
+    A task is skipped only if it was logged 'success' in this run AND (for a create) its table still exists.
+    A logged table that is gone is fine when every task that reads it is skipped too (e.g. dropped temp
+    tables); otherwise it is rebuilt. rerun_tables forces those tables to be rebuilt."""
+    dependents = {t['index']: [] for t in tasks}
+    for task in tasks:
+        for dep in task['deps']:
+            dependents[dep].append(task['index'])
+    skip = {}
+    for task in reversed(tasks):  # dependents always come later in the file, so they are decided first
+        i = task['index']
+        if task['label'] not in done_labels or (task['kind'] == 'create' and task['table'] in rerun_tables):
+            skip[i] = False
+        elif task['kind'] == 'create' and task['table']:
+            skip[i] = task['table'] in existing_tables or all(skip[j] for j in dependents[i])
+        else:
+            skip[i] = True
+    return {i for i, flag in skip.items() if flag}
 
 
 @logging_timer()

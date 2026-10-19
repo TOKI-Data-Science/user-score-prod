@@ -6,6 +6,10 @@ from loguru import logger
 from src.module.settings import settings
 
 
+class DeadlineExceeded(Exception):
+    """Raised before starting new work once the run's deadline (DEADLINE_HOURS) has passed"""
+
+
 def elapsed_time(total_seconds):
     """prints total elapsed time
     Args:
