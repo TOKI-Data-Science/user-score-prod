@@ -282,8 +282,8 @@ handset_combined as (
         end as model_overdue_days
     from tmp_handset_invoice a
     left join tmp_handset_repayment rep on a.loan_id = rep.loan_id and a.loan_invoice_id = rep.loan_invoice_id
-    inner join toki.handset_orders b on to_number(a.loan_id) = b.loanid
     inner join toki.handset_loan c on a.loan_id = c.id
+    inner join toki.handset_borrower b on c.borrower_id = b.id
     right join t_temp_lease_pool d on b.nationalid = d.ssn
         and trunc(a.due_date) between add_months(to_date(d.p_date, 'yyyymmdd'), -6)
                                   and add_months(to_date(d.p_date, 'yyyymmdd'), 12)

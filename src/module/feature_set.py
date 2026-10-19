@@ -1,8 +1,14 @@
 """Builds t_user_score_feature_set_temp; requires t_temp_union_pool to already exist."""
 from pathlib import Path
 
-from src.module.database import oracle_execute_script, oracle_table_exists
+from src.module.database import (
+    describe_script,
+    oracle_execute_script,
+    oracle_execute_script_parallel,
+    oracle_table_exists,
+)
 from src.module.helper import logging_timer
+from src.module.settings import settings
 from src.module.target_pool import TARGET_POOL_TABLE
 
 FEATURE_SET_SQL = Path(__file__).parent / 'queries' / 'feature_set.sql'
@@ -16,4 +22,17 @@ def build_feature_set(report=None):
         raise RuntimeError(
             f'{TARGET_POOL_TABLE} does not exist; run build_target_pool() first'
         )
-    oracle_execute_script(FEATURE_SET_SQL, report=report, step='build_feature_set')
+    if settings.feature_workers > 1:
+        oracle_execute_script_parallel(
+            FEATURE_SET_SQL,
+            report=report,
+            step='build_feature_set',
+            max_workers=settings.feature_workers,
+        )
+    else:
+        oracle_execute_script(FEATURE_SET_SQL, report=report, step='build_feature_set')
+
+
+def describe_feature_set():
+    """Prints the statement dependency order of feature_set.sql without touching the database"""
+    print(describe_script(FEATURE_SET_SQL))

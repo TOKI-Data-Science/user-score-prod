@@ -1,11 +1,15 @@
 import math
+import re
+import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import nullcontext
 
 import pandas as pd
+from loguru import logger
 from sqlalchemy import URL, create_engine, types
 from sqlalchemy.sql import text
 
-from src.module.helper import logging_timer
+from src.module.helper import elapsed_time, logging_timer
 from src.module.settings import settings
 
 oracle_connection_url = URL.create(
@@ -130,6 +134,182 @@ def oracle_execute_script(filepath, report=None, step=None):
                     if is_drop:
                         continue
                     raise
+
+
+_SQL_COMMENT = re.compile(r'--[^\n]*|/\*.*?\*/', re.S)
+
+
+def parse_script(filepath):
+    """Split a ';'-separated sql file into statements and work out which statements depend on which.
+
+    Each task is a dict: index, kind ('create' | 'drop' | 'other'), table, label, statement, deps.
+    Dependencies are detected from the statement text, so nothing has to be maintained by hand:
+      - a statement waits for the latest earlier statement that creates any script table it mentions
+      - a create/drop of table X also waits for every earlier statement that mentions X
+        (so a drop runs after the final join that reads the table)
+      - any other kind of statement (insert, update, ...) is a barrier: it waits for everything
+        before it and everything after it waits for it
+    A dependency is always on an earlier statement, so file order is itself a valid run order.
+    """
+    tasks = []
+    for position, statement in enumerate((s.strip() for s in sql_open(filepath).split(';')), start=1):
+        body = _SQL_COMMENT.sub(' ', statement).strip()
+        if not body:
+            continue
+        lowered = body.lower()
+        tokens = body.split()
+        lowered_tokens = [t.lower() for t in tokens[:4]]
+        is_create = lowered.startswith('create table') or lowered.startswith('create or replace table')
+        is_drop = lowered.startswith('drop table')
+        table = None
+        if (is_create or is_drop) and 'table' in lowered_tokens:
+            table = tokens[lowered_tokens.index('table') + 1].lower()
+        kind = 'create' if is_create else 'drop' if is_drop else 'other'
+        label = table or f'statement {position}'
+        if is_drop:
+            label = f'drop {label}'
+        tasks.append(
+            {
+                'index': len(tasks),
+                'kind': kind,
+                'table': table,
+                'label': label,
+                'statement': statement,
+                'text': lowered,
+                'deps': set(),
+            }
+        )
+
+    script_tables = {t['table'] for t in tasks if t['table']}
+    for task in tasks:
+        task['mentions'] = {
+            name
+            for name in script_tables
+            if re.search(rf'(?<![\w$#]){re.escape(name)}(?![\w$#])', task['text'])
+        }
+
+    latest_creator = {}
+    barrier = None
+    for task in tasks:
+        deps = task['deps']
+        if barrier is not None:
+            deps.add(barrier)
+        for name in task['mentions']:
+            if name in latest_creator:
+                deps.add(latest_creator[name])
+        if task['table']:
+            deps.update(u['index'] for u in tasks[: task['index']] if task['table'] in u['mentions'])
+        if task['kind'] == 'other':
+            deps.update(range(task['index']))
+            barrier = task['index']
+        if task['kind'] == 'create' and task['table']:
+            latest_creator[task['table']] = task['index']
+        deps.discard(task['index'])
+    return tasks
+
+
+def _schedule_info(tasks, weights=None):
+    """Level of each task and the longest remaining chain ('rank') that starts at it.
+    weights maps a task label to an estimated duration; unknown tasks count as 1."""
+    weight = {t['index']: (weights or {}).get(t['label'], 1) for t in tasks}
+    level = {}
+    finish = {}
+    for task in tasks:
+        i = task['index']
+        level[i] = 1 + max((level[d] for d in task['deps']), default=-1)
+        finish[i] = weight[i] + max((finish[d] for d in task['deps']), default=0)
+    rank = {t['index']: weight[t['index']] for t in tasks}
+    for task in reversed(tasks):
+        for d in task['deps']:
+            rank[d] = max(rank[d], weight[d] + rank[task['index']])
+    return level, finish, rank
+
+
+def describe_script(filepath, weights=None):
+    """Human readable run plan for a script (levels and critical path). Does not touch the database."""
+    tasks = parse_script(filepath)
+    level, finish, _ = _schedule_info(tasks, weights)
+    by_index = {t['index']: t for t in tasks}
+    lines = [f'{filepath}: {len(tasks)} statements']
+    for lvl in range(max(level.values(), default=-1) + 1):
+        names = [t['label'] for t in tasks if level[t['index']] == lvl]
+        lines.append(f'  level {lvl}: {len(names)} -> ' + ', '.join(names))
+    lines.append('  dependencies:')
+    for task in tasks:
+        deps = ', '.join(by_index[d]['label'] for d in sorted(task['deps'])) or '-'
+        lines.append(f"    {task['label']} <- {deps}")
+    end = max(finish, key=finish.get) if finish else None
+    path = []
+    while end is not None:
+        path.append(by_index[end]['label'])
+        end = max(by_index[end]['deps'], key=finish.get, default=None)
+    lines.append('  critical path: ' + ' -> '.join(reversed(path)))
+    return '\n'.join(lines)
+
+
+def _run_task(engine, task, report, step):
+    """Runs one statement on its own connection (one connection per thread)"""
+    tracker = report.track_table(step, task['label']) if report else nullcontext()
+    started = time.time()
+    logger.log(settings.log_level, f"Starting '{task['label']}'")
+    with tracker, engine.connect() as connection:
+        table = task['table']
+        if task['kind'] == 'create' and table:
+            exists = connection.execute(
+                text('select count(*) from user_tables where table_name = :name'), {'name': table.upper()}
+            ).scalar()
+            if exists:
+                connection.execute(text(f'drop table {table}'))
+                connection.commit()
+        try:
+            connection.execute(text(task['statement']))
+            connection.commit()
+        except Exception:
+            if task['kind'] != 'drop':  # drops are best-effort so reruns don't fail on a missing table
+                raise
+    logger.log(settings.log_level, f"Finished '{task['label']}' in {elapsed_time(time.time() - started)}")
+
+
+@logging_timer()
+def oracle_execute_script_parallel(filepath, report=None, step=None, max_workers=3, weights=None):
+    """Like oracle_execute_script, but runs statements that do not depend on each other at the same time.
+    Dependencies come from parse_script. With a failure, no new statement is started, statements already
+    running are allowed to finish (their tables stay in place), then the first error is raised.
+    weights (task label -> estimated seconds) makes the longest chains start first.
+    """
+    tasks = parse_script(filepath)
+    by_index = {t['index']: t for t in tasks}
+    _, _, rank = _schedule_info(tasks, weights)
+    pending = set(by_index)
+    done = set()
+    running = {}
+    error = None
+    engine = create_engine(oracle_connection_url, pool_size=max_workers, max_overflow=0)
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            while pending or running:
+                if error is None:
+                    ready = sorted((i for i in pending if by_index[i]['deps'] <= done), key=lambda i: (-rank[i], i))
+                    for i in ready[: max_workers - len(running)]:
+                        pending.discard(i)
+                        running[pool.submit(_run_task, engine, by_index[i], report, step)] = i
+                if not running:
+                    break
+                finished, _ = wait(running, return_when=FIRST_COMPLETED)
+                for future in finished:
+                    i = running.pop(future)
+                    try:
+                        future.result()
+                        done.add(i)
+                    except Exception as exc:
+                        logger.error(f"'{by_index[i]['label']}' failed: {exc}")
+                        error = error or exc
+    finally:
+        engine.dispose()
+    if error:
+        raise error
+    if pending:
+        raise RuntimeError(f'could not schedule: {[by_index[i]["label"] for i in sorted(pending)]}')
 
 
 @logging_timer()

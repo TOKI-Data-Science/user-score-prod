@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     oracle_hostname: str
     oracle_port: str = '1521'
     log_level: str = 'INFO'
+    feature_workers: int = 3  # >1 runs independent feature_set.sql statements in parallel; 1 = one at a time
 
     class Config:
         """.env file location"""

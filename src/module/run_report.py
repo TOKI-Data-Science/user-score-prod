@@ -1,4 +1,5 @@
 """Tracks per-step and per-table start/end/status/error for a pipeline run and renders an HTML report."""
+import threading
 import traceback
 from contextlib import contextmanager
 from datetime import datetime
@@ -20,6 +21,7 @@ class RunReport:
         self.run_started_at = datetime.now()
         self.steps = []
         self.tables = []
+        self._lock = threading.Lock()  # tables are tracked from worker threads in parallel steps
 
     @contextmanager
     def _record(self, records, name, extra=None):
@@ -32,7 +34,8 @@ class RunReport:
             'error': None,
             **(extra or {}),
         }
-        records.append(record)
+        with self._lock:
+            records.append(record)
         try:
             yield
             record['status'] = 'success'
