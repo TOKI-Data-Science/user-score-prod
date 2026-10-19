@@ -1620,7 +1620,7 @@ handset_combined as (
     left join tmp_handset_repayment rep on a.loan_id = rep.loan_id and a.loan_invoice_id = rep.loan_invoice_id
     inner join toki.handset_loan c on a.loan_id = c.id
     inner join toki.handset_borrower b on c.borrower_id = b.id
-    inner join t_us_pool_user d on b.accountid = d.user_id
+    inner join t_us_pool_user d on b.user_id = d.user_id
         and trunc(a.due_date, 'MM') between add_months(to_date(to_char(d.base_month), 'yyyymm'), -24)
         and add_months(to_date(to_char(d.base_month), 'yyyymm'), -1)
     --where a.invoice_type = 'SCHEDULED' 
