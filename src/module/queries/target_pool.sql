@@ -284,7 +284,7 @@ handset_combined as (
     left join tmp_handset_repayment rep on a.loan_id = rep.loan_id and a.loan_invoice_id = rep.loan_invoice_id
     inner join toki.handset_loan c on a.loan_id = c.id
     inner join toki.handset_borrower b on c.borrower_id = b.id
-    right join t_temp_lease_pool d on b.nationalid = d.ssn
+    right join t_temp_lease_pool d on b.ssn = d.ssn
         and trunc(a.due_date) between add_months(to_date(d.p_date, 'yyyymmdd'), -6)
                                   and add_months(to_date(d.p_date, 'yyyymmdd'), 12)
     where a.invoice_type = 'SCHEDULED' --and c.is_staff_deal = 0
