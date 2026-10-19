@@ -1075,7 +1075,7 @@ mobility_cars as (
       sc.user_car,
       sc.delflg,
       sc.createdat                                             as saved_createdat,
-      oc.identifier                                            as owner_user_id,
+      oc.id_                                            as owner_user_id,
       c.plate_number
     from toki.mobility_car_infos c
     left join saved_cars sc
