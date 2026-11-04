@@ -73,7 +73,9 @@ class RunLog:
         """Starts a run, or continues the latest unfinished run of the month.
         Returns None when resume_only is set and there is nothing to continue."""
         run_month = str(run_month or settings.run_month or f'{datetime.now():%Y%m}')
-        engine = create_engine(oracle_connection_url)
+        # the run log is written rarely while statements run for minutes; pre_ping replaces a connection that the
+        # database or network closed meanwhile (DPY-4011) instead of failing the write
+        engine = create_engine(oracle_connection_url, pool_pre_ping=True, pool_recycle=600)
         with engine.begin() as connection:
             exists = connection.execute(
                 text('select count(*) from user_tables where table_name = :name'), {'name': RUN_LOG_TABLE.upper()}
