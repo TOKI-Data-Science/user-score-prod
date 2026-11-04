@@ -10,17 +10,17 @@ Entry point: `python script.py` (calls `src/main.py:main()`).
 Runs 4 sequential steps, each depending on the previous step's output table:
 
 1. **`build_target_pool()`** ([src/module/target_pool.py](src/module/target_pool.py)) - runs
-   `target_pool.sql`, enriches with pandas (mob correction/grouping), writes
+   `target_pool_upd.sql`, enriches with pandas (mob correction/grouping), writes
    `t_temp_union_pool` (one row per `user_id`, with `register_based_id` and the
-   register's `mob`/`model_od`). `target_pool.sql` also builds `t_temp_user_map`
+   register's `mob`/`model_od`). `target_pool_upd.sql` also builds `t_temp_user_map`
    (`register_based_id`, `user_id`), which lists every user_id a register has had.
 2. **`build_feature_set()`** ([src/module/feature_set.py](src/module/feature_set.py)) - runs
-   `feature_set.sql`, writes `t_user_score_feature_set_temp`. It first builds shared
+   `feature_set_upd.sql`, writes `t_user_score_feature_set_temp`. It first builds shared
    base tables (`t_us_pool_user`, `t_us_credit_user`, `t_us_credit_monthly`,
    `t_us_base_thoth`) that the feature queries reuse; they are dropped at the end
-   of `inactive_tag.sql`, which still reads `t_us_credit_monthly`.
+   of `inactive_tag_upd.sql`, which still reads `t_us_credit_monthly`.
 3. **`build_inactive_tag()`** ([src/module/inactive_tag.py](src/module/inactive_tag.py)) - runs
-   `inactive_tag.sql`, writes `t_user_score_inactive_tag`, snapshots it as
+   `inactive_tag_upd.sql`, writes `t_user_score_inactive_tag`, snapshots it as
    `t_user_score_inactive_tag_<yyyymm>`, and upserts (by `base_month`) into the
    permanent history table `t_user_score_raw`.
 4. **`build_user_score()`** ([src/module/user_score.py](src/module/user_score.py)) - scores
@@ -29,12 +29,41 @@ Runs 4 sequential steps, each depending on the previous step's output table:
    `t_user_score_result_<yyyymm>`, and upserts into the permanent history table
    `t_user_score_result`.
 
+### SQL files and BNPL sources
+
+The pipeline loads the `*_upd.sql` files in [src/module/queries/](src/module/queries/). The
+unsuffixed `target_pool.sql`, `feature_set.sql` and `inactive_tag.sql` are the previous versions and
+are no longer loaded.
+
+BNPL data comes from the migrated `toki.bnpl_mig_*` tables:
+
+| Table | Used for |
+|---|---|
+| `bnpl_mig_bnpl_account`, `bnpl_mig_borrower` | map an account to its `user_id` |
+| `bnpl_mig_bnpl_account_history` | limit/status history (pool, limit usage) |
+| `bnpl_mig_loan` | loan requests (amount `principal_amt`, `created_date`, `status`) |
+| `bnpl_mig_invoice` | invoices (`due_date`, `total_fixed_invoice_amt`, `fully_paid_date`) |
+| `bnpl_mig_invoice_payment`, `bnpl_mig_payment` | repayments (`principal_paid_amt`, `payment_type`) |
+| `bnpl_mig_limit_request` | limit requests in `feature_set_upd.sql` |
+
+Conventions to keep in mind when editing the BNPL queries:
+
+- A repayment has `payment_type = 'PAYMENT'` (formerly `'REPAYMENT'`); `REFUND` rows and
+  `EXTENSION_FEE` invoices are excluded from the overdue calculation.
+- Overdue days (`od` / `model_od`) are counted per invoice from `due_date`. In `target_pool_upd.sql`
+  only invoices due in `base_month - 6` .. `base_month - 1` count, so invoices due in the current
+  month never produce overdue days.
+- Loans with no repayment are kept (left joins) and count as open balance in limit usage.
+
+Still on the old source: `toki.dpr_tajet_bnpl_request` in `feature_set_upd.sql` (request-count
+features).
+
 ### Parallel feature set
 
-`build_feature_set()` runs the independent statements of `feature_set.sql` at the same time, using
+`build_feature_set()` runs the independent statements of `feature_set_upd.sql` at the same time, using
 Python threads (`ThreadPoolExecutor`), one Oracle connection per thread. `FEATURE_WORKERS` sets how
 many statements run at once (default `3`; `1` = one statement at a time). Dependencies between
-statements are detected from the SQL text, so `feature_set.sql` stays a single file. If a statement
+statements are detected from the SQL text, so `feature_set_upd.sql` stays a single file. If a statement
 fails, no new statement starts, running ones finish, then the error is raised. Higher values put more
 load on Oracle (TEMP/PGA), so raise it only after checking with the DBA. To see the detected order
 without touching the database:
@@ -71,7 +100,7 @@ Environment variables (all optional):
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `FEATURE_WORKERS` | `3` | statements of `feature_set.sql` run at once |
+| `FEATURE_WORKERS` | `3` | statements of `feature_set_upd.sql` run at once |
 | `DEADLINE_HOURS` | `5.5` | stop starting new work after this many hours |
 | `RUN_MONTH` | current month | `yyyymm` of the run to start/continue |
 | `FORCE_RERUN` | `false` | ignore the unfinished run and start a new one |

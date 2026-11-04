@@ -13,13 +13,13 @@ from src.module.helper import logging_timer
 from src.module.target_pool import TARGET_POOL_TABLE
 from src.module.feature_set import FEATURE_SET_TABLE
 
-INACTIVE_TAG_SQL = Path(__file__).parent / 'queries' / 'inactive_tag.sql'
+INACTIVE_TAG_SQL = Path(__file__).parent / 'queries' / 'inactive_tag_upd.sql'
 INACTIVE_TAG_TABLE = 't_user_score_inactive_tag'
 RAW_HISTORY_TABLE = 't_user_score_raw'
 
 @logging_timer(entry=True, exit=True)
 def build_inactive_tag(report=None, run_log=None):
-    """Runs inactive_tag.sql, snapshots the result by run month, and upserts it into t_user_score_raw.
+    """Runs inactive_tag_upd.sql, snapshots the result by run month, and upserts it into t_user_score_raw.
     With a run_log, statements already finished in this run are skipped (restart)."""
     if not oracle_table_exists(TARGET_POOL_TABLE):
         raise RuntimeError(

@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     oracle_hostname: str
     oracle_port: str = '1521'
     log_level: str = 'INFO'
-    feature_workers: int = 3  # >1 runs independent feature_set.sql statements in parallel; 1 = one at a time
+    feature_workers: int = 3  # >1 runs independent feature_set_upd.sql statements in parallel; 1 = one at a time
     deadline_hours: float = 5.5  # stop starting new work after this many hours (DB runtime limit is 6h); 0 = off
     run_month: str | None = None  # yyyymm; month of the run to start/resume, default = current month
     force_rerun: bool = False  # ignore any unfinished run for the month and start a new one

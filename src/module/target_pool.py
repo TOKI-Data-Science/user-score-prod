@@ -6,7 +6,7 @@ import pandas as pd
 from src.module.database import oracle_execute_script_parallel, oracle_export, oracle_import
 from src.module.helper import logging_timer
 
-TARGET_POOL_SQL = Path(__file__).parent / 'queries' / 'target_pool.sql'
+TARGET_POOL_SQL = Path(__file__).parent / 'queries' / 'target_pool_upd.sql'
 TARGET_POOL_TABLE = 't_temp_union_pool'
 PANDAS_TASK = 'pandas_enrich'
 
@@ -75,7 +75,7 @@ def enforce_non_downgrade(df, mob_col, key_col='register_based_id'):
 
 @logging_timer(entry=True, exit=True)
 def build_target_pool(report=None, run_log=None):
-    """Runs target_pool.sql, enriches the result in pandas, and writes it back to Oracle.
+    """Runs target_pool_upd.sql, enriches the result in pandas, and writes it back to Oracle.
     The pandas part replaces t_temp_union_pool with a different layout, so it is logged as its own task
     ('pandas_enrich'); if a restart finds it unfinished, t_temp_union_pool is rebuilt from the SQL first."""
     step = 'build_target_pool'
