@@ -120,8 +120,8 @@ docker run --rm --env-file=$HOME/envs/oracle-template.env oracle-template:v0.1.0
 [.github/workflows/run-pipeline.yml](.github/workflows/run-pipeline.yml) runs
 the pipeline on a self-hosted runner (`production` environment):
 
-- **Schedule**: 11:00 Asia/Ulaanbaatar (UTC+8) on the 3rd of every month
-- **Resume schedule**: 17:00 Asia/Ulaanbaatar on the 3rd runs with `RESUME_ONLY=true`: it continues a
+- **Schedule**: 11:00 Asia/Ulaanbaatar (UTC+8) on the 4th of every month
+- **Resume schedule**: 17:00 Asia/Ulaanbaatar on the 4th runs with `RESUME_ONLY=true`: it continues a
   `partial`/`failed` run and does nothing if the morning run finished
 - **Manual trigger**: `workflow_dispatch` with inputs `resume`, `run_month` and `force_rerun`
 - Only one pipeline run at a time (`concurrency` group); job timeout 420 min

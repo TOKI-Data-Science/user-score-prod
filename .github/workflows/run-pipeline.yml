@@ -2,11 +2,11 @@ name: Run pipeline
 
 on:
   schedule:
-    # 11:00 Asia/Ulaanbaatar (UTC+8) on the 3rd of every month = 03:00 UTC
-    - cron: "0 3 3 * *"
-    # 17:00 Asia/Ulaanbaatar on the 3rd = 09:00 UTC: continues the run above if it stopped at
+    # 11:00 Asia/Ulaanbaatar (UTC+8) on the 4th of every month = 03:00 UTC
+    - cron: "0 3 4 * *"
+    # 17:00 Asia/Ulaanbaatar on the 4th = 09:00 UTC: continues the run above if it stopped at
     # DEADLINE_HOURS (partial) or failed; does nothing if that run already finished
-    - cron: "0 9 3 * *"
+    - cron: "0 9 4 * *"
   workflow_dispatch:
     inputs:
       resume:
@@ -41,7 +41,7 @@ jobs:
           ORACLE_PORT: ${{ secrets.ORACLE_PORT }}
           ORACLE_SERVICE: ${{ secrets.ORACLE_SERVICE }}
           LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
-          RESUME_ONLY: ${{ github.event.schedule == '0 9 3 * *' || inputs.resume || false }}
+          RESUME_ONLY: ${{ github.event.schedule == '0 9 4 * *' || inputs.resume || false }}
           FORCE_RERUN: ${{ inputs.force_rerun || false }}
           RUN_MONTH: ${{ inputs.run_month }}
         run: |
